@@ -18,13 +18,13 @@ test("public executable resolves help and version outside a project", async () =
   assert.match(help.stdout, /orbit dashboard/);
   assert.doesNotMatch(help.stdout, /orbit serve/);
 });
-test("dashboard is a configured external service", async () => {
+test("hosted dashboard remains an explicit external service", async () => {
   const options = {
     env: { ...process.env, ORBIT_SERVER_URL: "https://orbit.example" },
   };
   const result = await exec(
     process.execPath,
-    ["bin/orbit.js", "dashboard"],
+    ["bin/orbit.js", "dashboard", "--remote"],
     options,
   );
   assert.equal(result.stdout.trim(), "https://orbit.example");

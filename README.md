@@ -33,7 +33,8 @@ Orbit treats conversation history as a project artifact:
 - **Portable:** adapters translate native transcripts into one unified model.
 - **Traceable:** projects, workstreams, sessions, events, and handoffs retain identity.
 - **Local-first:** the authoritative history lives in `.orbit/` inside your project.
-- **Selective:** dashboard publishing is opt-in and separate from local capture.
+- **Visible:** a local dashboard shows captured history automatically, without an account.
+- **Selective:** publishing to a hosted server remains opt-in.
 
 ## Mental model
 
@@ -99,21 +100,23 @@ destination agent.
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `orbit init` | Initialize Orbit in the current project |
-| `orbit claude` | Launch Claude Code and capture the session |
-| `orbit codex` | Launch Codex and capture the session |
-| `orbit switch <agent>` | Continue the latest substantive conversation in another agent |
-| `orbit continue <workstream> --agent <agent>` | Continue a specific workstream |
-| `orbit history` | List conversations with the most recently edited first |
-| `orbit context <workstream>` | Read normalized history with cursor-based pagination |
-| `orbit import --list` | Discover supported native conversations for import |
-| `orbit log` | Browse saved conversation checkpoints |
-| `orbit auth login` | Connect the CLI to an Orbit dashboard |
-| `orbit publish select <session>` | Select a session for dashboard publishing |
-| `orbit push` | Publish the selected local projection |
-| `orbit help` | Show CLI help |
+| Command                                       | Purpose                                                       |
+| --------------------------------------------- | ------------------------------------------------------------- |
+| `orbit init`                                  | Initialize Orbit in the current project                       |
+| `orbit claude`                                | Launch Claude Code and capture the session                    |
+| `orbit codex`                                 | Launch Codex and capture the session                          |
+| `orbit switch <agent>`                        | Continue the latest substantive conversation in another agent |
+| `orbit continue <workstream> --agent <agent>` | Continue a specific workstream                                |
+| `orbit history`                               | List conversations with the most recently edited first        |
+| `orbit context <workstream>`                  | Read normalized history with cursor-based pagination          |
+| `orbit import --list`                         | Discover supported native conversations for import            |
+| `orbit log`                                   | Browse saved conversation checkpoints                         |
+| `orbit dashboard`                             | Open the local dashboard with automatic history updates       |
+| `orbit dashboard --stop`                      | Stop the background dashboard service                         |
+| `orbit auth login`                            | Connect the CLI to an Orbit dashboard                         |
+| `orbit publish select <session>`              | Select a session for dashboard publishing                     |
+| `orbit push`                                  | Publish the selected local projection                         |
+| `orbit help`                                  | Show CLI help                                                 |
 
 ## How switching works
 
@@ -145,13 +148,48 @@ but binary attachment synchronization is outside the current release.
 Deleting a session removes it from the current history revision. Older Git commits
 and native agent transcripts may still retain the original data.
 
-## Dashboard boundary
+## Local dashboard
 
-This repository contains the Orbit CLI only. It does not include a web server,
-browser UI, or hosted account database. The dashboard is maintained and deployed
-from a separate repository.
+Initialize a project, capture or import conversations, and open the viewer:
 
-Publishing is disabled by default and limited to explicitly selected sessions:
+```sh
+orbit init
+orbit dashboard
+```
+
+The dashboard runs at `http://127.0.0.1:4319` and opens directly to your projects.
+It includes project history, workstreams, connected agent sessions, conversation
+search, checkpoints, and comparisons. No account, sign-in, Docker, or manual push
+is needed. New captured events appear automatically, even before a checkpoint.
+
+`orbit init` and capture/import commands register the project and start the local
+service. For projects created with an older Orbit release, run `orbit dashboard`
+inside each project once. The dashboard then lists those registered projects from
+any directory. Existing native agent transcripts still require `orbit import`.
+
+The viewer reads each project's existing `.orbit/` database. A private directory
+at `~/.orbit/viewer/projects/` records project locations; it does not duplicate the
+conversations. The service binds to loopback and accepts same-origin requests.
+The browser is read only; use the CLI to change history or launch an agent.
+
+```sh
+orbit dashboard --no-open        # Print the URL without opening a browser
+orbit dashboard --stop           # Stop the background service
+orbit dashboard --foreground     # Run the service in this terminal
+orbit dashboard --port 4320      # Use another local port
+```
+
+Set `ORBIT_VIEWER=0` to disable automatic viewer startup and project registration.
+An explicit `orbit dashboard` still works. Set `ORBIT_VIEWER_PORT` to keep a custom
+port across commands. Closing a browser tab does not stop the service.
+
+The npm package includes the local UI and its fonts. Hosted accounts and the
+hosted API remain in the separate `orbit-dashboard` repository.
+
+## Optional hosted publishing
+
+Use `orbit dashboard --remote` to print the configured hosted dashboard URL.
+Hosted publishing is disabled by default and limited to selected sessions:
 
 ```sh
 export ORBIT_SERVER_URL=https://your-orbit-server.example

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { contextCommand } from "./commands/context-reader.js";
+import { attachViewer, dashboardCommand } from "./viewer/service.js";
 import {
   access,
   appendFile,
@@ -47,7 +48,9 @@ const help = [
   "orbit clone <url> <directory>",
   "orbit publish enable|disable       Opt in/out of automatic publishing",
   "orbit auth login|logout|status",
-  "orbit dashboard                    Print the configured dashboard URL",
+  "orbit dashboard                    Open your local conversation dashboard",
+  "orbit dashboard --stop             Stop the local dashboard",
+  "orbit dashboard --remote           Print the configured hosted dashboard URL",
   "orbit import                       Preview and import native session history",
   "orbit providers                    Inspect local intelligence providers",
   "orbit intelligence configure --provider <codex|claude> [--auto on|off]",
@@ -76,12 +79,13 @@ async function ignoreSource(root: string) {
 async function main() {
   const [command = "help", ...args] = process.argv.slice(2);
   if (command === "dashboard") {
-    console.log(serverUrl());
+    if (args.length === 1 && args[0] === "--remote") console.log(serverUrl());
+    else await dashboardCommand(args);
     return;
   }
   if (command === "serve")
     throw new Error(
-      "The dashboard is maintained in orbit-dashboard. Use orbit dashboard to see your configured server URL.",
+      "Use orbit dashboard to open the local viewer. The separate orbit-dashboard repository provides hosted accounts.",
     );
   if (["help", "--help", "-h"].includes(command)) {
     console.log(help);
@@ -232,15 +236,22 @@ async function main() {
     }
     if (command === "init") {
       await repo.checkpoint("Initialize Orbit conversation history");
+      await attachViewer(root, pid);
       console.log(
         "Orbit initialized at " +
           root +
           "\nProject: " +
           pid +
-          "\nPublishing disabled",
+          "\nLocal dashboard: orbit dashboard\nCloud publishing disabled",
       );
       return;
     }
+    if (
+      ["codex", "claude", "switch", "continue", "import", "new"].includes(
+        command,
+      )
+    )
+      await attachViewer(root, pid);
     if (await historyCommand({ command, args, repo, pid, root, project }))
       return;
     if (await memoryCommand({ command, args, repo, pid, root, project }))

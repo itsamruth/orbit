@@ -2,6 +2,7 @@ import { build } from "esbuild";
 import { execFileSync } from "node:child_process";
 import { chmod, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { build as buildViewer } from "vite";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 await rm(new URL("../dist/", import.meta.url), {
@@ -12,6 +13,14 @@ execFileSync(process.execPath, ["node_modules/typescript/bin/tsc"], {
   cwd: root,
   stdio: "inherit",
 });
+execFileSync(
+  process.execPath,
+  ["node_modules/typescript/bin/tsc", "-p", "ui/tsconfig.json"],
+  {
+    cwd: root,
+    stdio: "inherit",
+  },
+);
 await build({
   absWorkingDir: root,
   entryPoints: ["src/cli.ts"],
@@ -26,3 +35,6 @@ await build({
   },
 });
 await chmod(new URL("../bin/orbit.js", import.meta.url), 0o755);
+await buildViewer({
+  configFile: fileURLToPath(new URL("../ui/vite.config.ts", import.meta.url)),
+});
