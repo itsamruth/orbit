@@ -48,10 +48,17 @@ Project
 Switching agents creates a linked session in the same workstream. It does not copy
 the conversation into a second source of truth.
 
-## Install from source
+## Install
 
 Orbit currently requires Node.js 22.14 or newer and Git. Install and authenticate
 Claude Code or Codex separately.
+
+```sh
+npm install --global @itsamruth/orbit
+orbit --version
+```
+
+### From source
 
 ```sh
 git clone https://github.com/itsamruth/orbit.git
@@ -61,8 +68,6 @@ npm run build
 npm link
 orbit --version
 ```
-
-The package is prepared as `@orbit/cli` but is not yet published to npm.
 
 ## Quick start
 

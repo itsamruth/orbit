@@ -1,9 +1,26 @@
 {
-  "name": "@orbit/cli",
+  "name": "@itsamruth/orbit",
   "version": "0.1.0",
-  "description": "Keep coding conversations in Git and continue them across agents",
+  "description": "Git for AI agent conversations.",
   "type": "module",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/itsamruth/orbit.git"
+  },
+  "homepage": "https://github.com/itsamruth/orbit#readme",
+  "bugs": {
+    "url": "https://github.com/itsamruth/orbit/issues"
+  },
+  "keywords": [
+    "ai",
+    "cli",
+    "coding-agent",
+    "claude-code",
+    "codex",
+    "conversation-history",
+    "developer-tools"
+  ],
   "engines": {
     "node": ">=22.14.0"
   },
@@ -14,7 +31,8 @@
     "bin/orbit.js",
     "dist/orbit.js",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
