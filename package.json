@@ -1,0 +1,35 @@
+{
+  "name": "orbit-cli-repository",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Git-backed conversation history and agent switching for Codex and Claude Code",
+  "workspaces": ["apps/*", "packages/*"],
+  "engines": { "node": ">=22.14.0" },
+  "scripts": {
+    "build": "tsc -b && npm run build -w @orbit/web && npm run build:cli",
+    "build:cli": "node scripts/build-cli.mjs",
+    "typecheck": "tsc -b && npm exec -w @orbit/web -- tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "orbit": "node apps/cli/dist/index.js",
+    "dev:portal": "npm run dev -w @orbit/web"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/pg": "^8.23.1",
+    "esbuild": "^0.25.12",
+    "prettier": "^3.9.6",
+    "tsx": "^4.23.13",
+    "typescript": "~5.7.3"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "@sinclair/typebox": "^0.34.52",
+    "better-sqlite3": "^11.10.0",
+    "fastify": "^5.12.3",
+    "minimatch": "^10.2.6",
+    "nodemailer": "^10.0.3",
+    "pg": "^8.23.0"
+  }
+}

@@ -1,0 +1,13 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+.carry/
+
+.orbit/
+.orbit-cloud/
+test-results/
+playwright-report/

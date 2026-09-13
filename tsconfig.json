@@ -1,0 +1,18 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/core" },
+    { "path": "packages/contracts" },
+    { "path": "packages/project" },
+    { "path": "packages/adapter-kit" },
+    { "path": "packages/adapter-codex" },
+    { "path": "packages/adapter-claude" },
+    { "path": "packages/local-store" },
+    { "path": "packages/git-store" },
+    { "path": "packages/sync" },
+    { "path": "packages/handoff" },
+    { "path": "packages/security" },
+    { "path": "apps/cli" },
+    { "path": "apps/api" }
+  ]
+}

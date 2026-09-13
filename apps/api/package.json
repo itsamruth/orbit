@@ -1,0 +1,28 @@
+{
+  "name": "@orbit/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -b"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.1.2",
+    "@fastify/rate-limit": "^10.3.0",
+    "@orbit/contracts": "*",
+    "@orbit/core": "*",
+    "@orbit/git-store": "*",
+    "@orbit/local-store": "*",
+    "fastify": "^5.12.3",
+    "nodemailer": "^10.0.3",
+    "pg": "^8.23.0"
+  }
+}

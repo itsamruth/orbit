@@ -1,0 +1,48 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": [
+    "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/project"
+    },
+    {
+      "path": "../../packages/local-store"
+    },
+    {
+      "path": "../../packages/security"
+    },
+    {
+      "path": "../../packages/adapter-kit"
+    },
+    {
+      "path": "../../packages/adapter-codex"
+    },
+    {
+      "path": "../../packages/adapter-claude"
+    },
+    {
+      "path": "../../packages/handoff"
+    },
+    {
+      "path": "../../packages/sync"
+    },
+    {
+      "path": "../../packages/git-store"
+    },
+    {
+      "path": "../api"
+    }
+  ]
+}
