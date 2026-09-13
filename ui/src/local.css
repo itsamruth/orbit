@@ -1,0 +1,104 @@
+.local-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+}
+.local-connection {
+  margin: 12px 24px;
+}
+.local-quickstart {
+  padding: 24px;
+  margin: 20px 0;
+}
+.modal-body .local-quickstart {
+  padding: 0;
+  margin: 0;
+}
+.local-quickstart p {
+  margin: 12px 0;
+  color: var(--fg-muted);
+  line-height: 1.8;
+}
+.local-quickstart .command {
+  margin: 12px 0;
+}
+.local-search-result {
+  align-items: flex-start;
+}
+.local-search-result p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+  color: var(--fg-muted);
+}
+.event-body,
+.repo-item-main,
+.workspace-content {
+  min-width: 0;
+}
+.event-body pre {
+  max-height: 640px;
+  overflow: auto;
+}
+.repo-item-description {
+  overflow-wrap: anywhere;
+}
+.repo-breadcrumb {
+  flex-wrap: wrap;
+}
+@media (max-width: 680px) {
+  .workspace-page {
+    display: block;
+    padding-inline: 16px;
+  }
+  .workspace-nav {
+    display: none;
+  }
+  .AppHeader-nav {
+    display: none;
+  }
+  .AppHeader-inner {
+    padding-inline: 16px;
+  }
+  .local-status {
+    font-size: 11px;
+  }
+  .repo-item {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .project-row-end {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .listing-toolbar {
+    flex-wrap: wrap;
+  }
+  .FormControl-search {
+    min-width: 0;
+    flex: 1 1 180px;
+  }
+  .PageHeader-title {
+    overflow-wrap: anywhere;
+    font-size: 24px;
+  }
+  .PageHeader-meta {
+    flex-wrap: wrap;
+  }
+  .session-chain-section {
+    min-width: 0;
+  }
+  .agent-handoff {
+    flex-wrap: wrap;
+  }
+  .local-quickstart {
+    padding: 16px;
+  }
+  .footer-inner {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+}
