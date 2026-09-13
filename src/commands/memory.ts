@@ -1,4 +1,5 @@
 import type { CommandContext } from "./context.js";
+import { confirm } from "../sessions/runtime.js";
 export async function memoryCommand({
   command,
   args,
