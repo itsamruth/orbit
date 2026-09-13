@@ -1,13 +1,12 @@
 node_modules/
 dist/
 coverage/
+*.tgz
+*.tsbuildinfo
 .env
 .env.*
 !.env.example
-*.tsbuildinfo
-.carry/
-
 .orbit/
+.carry/
 .orbit-cloud/
-test-results/
-playwright-report/
+.DS_Store

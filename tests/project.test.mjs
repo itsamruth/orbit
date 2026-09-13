@@ -9,7 +9,7 @@ import {
   resolveProject,
   inspectWorkspace,
   inspectRepository,
-} from "../packages/project/dist/index.js";
+} from "../dist/project/index.js";
 
 async function workspace(t) {
   const root = await mkdtemp(join(tmpdir(), "orbit-test-"));

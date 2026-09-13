@@ -12,10 +12,7 @@ import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import {
-  Repository,
-  SqliteDatabase,
-} from "../packages/local-store/dist/index.js";
+import { Repository, SqliteDatabase } from "../dist/storage/journal/index.js";
 const exec = promisify(execFile);
 test("CLI captures exact native session and switches with preserved context", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "orbit-cli-"));
@@ -35,7 +32,7 @@ test("CLI captures exact native session and switches with preserved context", as
     CLAUDE_CONFIG_DIR: join(dir, "claude"),
     ORBIT_CONFIG_DIR: join(dir, "orbit-config"),
   };
-  const cli = resolve("apps/cli/dist/index.js");
+  const cli = resolve("bin/orbit.js");
   const run = (args) =>
     exec(process.execPath, [cli, ...args], { cwd: root, env });
   await run(["init"]);

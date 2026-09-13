@@ -20,14 +20,12 @@ import {
   compare,
   cloneRepository,
   snapshotRepository,
-} from "../packages/git-store/dist/index.js";
+} from "../dist/storage/git/index.js";
 import {
   SqliteDatabase,
   Repository,
   fingerprint,
-} from "../packages/local-store/dist/index.js";
-import { buildServer } from "../apps/api/dist/server.js";
-import { hash } from "../apps/api/dist/auth.js";
+} from "../dist/storage/journal/index.js";
 const exec = promisify(execFile);
 const now = new Date().toISOString();
 const project = {
@@ -200,7 +198,7 @@ test("CLI init and branches preserve the source repository", async (t) => {
   await git(root, ["commit", "-m", "Source"]);
   const before = await gitText(root, ["rev-parse", "HEAD"]),
     index = await readFile(join(root, ".git", "index"));
-  const cli = resolve("apps/cli/dist/index.js");
+  const cli = resolve("bin/orbit.js");
   await exec(process.execPath, [cli, "init"], { cwd: root });
   await exec(process.execPath, [cli, "branch", "experiment"], { cwd: root });
   await exec(process.execPath, [cli, "checkout", "experiment"], { cwd: root });
@@ -209,170 +207,9 @@ test("CLI init and branches preserve the source repository", async (t) => {
   assert.equal(await gitText(root, ["status", "--porcelain"]), "");
   assert.equal(await readFile(join(root, "code.txt"), "utf8"), "original");
 });
-async function serverFixture(t) {
-  const root = await mkdtemp(join(tmpdir(), "orbit-host-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const db = new SqliteDatabase(":memory:");
-  t.after(() => db.close());
-  let links = [];
-  const origin = "http://127.0.0.1:4327";
-  const app = await buildServer(db, {
-    origin,
-    repositoryRoot: root,
-    sendEmail: async (email, url) => {
-      links.push({ email, url });
-    },
-  });
-  t.after(() => app.close());
-  return { root, db, app, origin, links };
-}
-test("email confirmation consumes one-use tokens only on POST and authorizes devices", async (t) => {
-  const { app, db, origin, links } = await serverFixture(t);
-  const sent = await app.inject({
-    method: "POST",
-    url: "/api/v1/auth/email/request",
-    headers: { origin },
-    payload: { email: "owner@example.test" },
-  });
-  assert.equal(sent.statusCode, 202, sent.body);
-  assert.equal(links.length, 1);
-  const token = new URL(links[0].url).searchParams.get("token");
-  const page = await app.inject({ url: "/login?token=" + token });
-  assert.equal(page.statusCode, 200);
-  const signed = await app.inject({
-    method: "POST",
-    url: "/api/v1/auth/email/confirm",
-    headers: { origin },
-    payload: { token },
-  });
-  assert.equal(signed.statusCode, 200, signed.body);
-  assert.equal(
-    (
-      await app.inject({
-        method: "POST",
-        url: "/api/v1/auth/email/confirm",
-        headers: { origin },
-        payload: { token },
-      })
-    ).statusCode,
-    401,
-  );
-  const cookie = signed.cookies[0].name + "=" + signed.cookies[0].value;
-  const created = await app.inject({
-    method: "POST",
-    url: "/api/v1/projects",
-    headers: { origin, cookie },
-    payload: { id: project.id, name: project.name },
-  });
-  assert.equal(created.statusCode, 200, created.body);
-  assert.equal(
-    (await app.inject({ url: "/api/v1/projects/" + project.id })).statusCode,
-    401,
-  );
-  assert.equal(
-    (
-      await app.inject({
-        url: "/git/" + project.id + ".git/info/refs?service=git-upload-pack",
-      })
-    ).statusCode,
-    401,
-  );
-});
-test("authenticated HTTP Git push, clone, revision-pinned API and rejected malformed push", async (t) => {
-  const { app, db, root, origin } = await serverFixture(t);
-  await db.query(
-    "INSERT INTO orbit_accounts (id,login,avatar_url) VALUES ($1,$2,$3)",
-    ["usr_test", "tester", null],
-  );
-  const token = "test-device-token";
-  await db.query(
-    "INSERT INTO orbit_credentials (hash,user_id,kind,device_id,name,created_at,expires_at,last_seen_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
-    [
-      hash(token),
-      "usr_test",
-      "cli",
-      "device_test",
-      "fixture",
-      now,
-      new Date(Date.now() + 3600000).toISOString(),
-      now,
-    ],
-  );
-  const headers = { authorization: "Bearer " + token };
-  const created = await app.inject({
-    method: "POST",
-    url: "/api/v1/projects",
-    headers,
-    payload: { id: project.id, name: project.name },
-  });
-  assert.equal(created.statusCode, 200, created.body);
-  await app.listen({ host: "127.0.0.1", port: 4327 });
-  const dir = join(root, "client"),
-    repo = await GitRepository.open(dir, true);
-  t.after(() => repo.db.close());
-  for (const [kind, data] of [
-    ["project", project],
-    ["workstream", work],
-    ["session", session],
-  ])
-    await repo.put(project.id, kind, data);
-  await repo.capture(
-    project.id,
-    "native",
-    60,
-    Array.from({ length: 60 }, (_, i) => event(i)),
-  );
-  const first = await repo.checkpoint("First push");
-  await repo.remote("origin", origin + "/git/" + project.id + ".git");
-  const env = {
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "http.extraHeader",
-    GIT_CONFIG_VALUE_0: "Authorization: Bearer " + token,
-  };
-  await repo.push("origin", env);
-  const response = await app.inject({
-    url:
-      "/api/v1/projects/" + project.id + "/sessions/" + session.id + "/events",
-    headers,
-  });
-  assert.equal(response.statusCode, 200, response.body);
-  const cursor = response.json().nextCursor;
-  assert.ok(cursor);
-  await repo.put(project.id, "event", event(60));
-  await repo.checkpoint("Next push");
-  await repo.push("origin", env);
-  const page = await app.inject({
-    url:
-      "/api/v1/projects/" +
-      project.id +
-      "/sessions/" +
-      session.id +
-      "/events?cursor=" +
-      cursor,
-    headers,
-  });
-  assert.equal(page.json().items.length, 10);
-  assert.equal(page.json().revision, first);
-  const clone = await cloneRepository(
-    origin + "/git/" + project.id + ".git",
-    join(root, "clone"),
-    env,
-  );
-  t.after(() => clone.db.close());
-  assert.equal((await clone.list(project.id, "event")).length, 61);
-  await writeFile(join(repo.history, "bad.txt"), "invalid");
-  await git(repo.history, ["add", "bad.txt"]);
-  await git(repo.history, ["commit", "-m", "Invalid repository"]);
-  await assert.rejects(repo.push("origin", env), /rejected|hook declined/i);
-  await db.query("DELETE FROM orbit_credentials WHERE hash=$1", [hash(token)]);
-  await assert.rejects(
-    repo.fetch("origin", env),
-    /401|403|authentication|Authenticate|terminal prompts disabled/i,
-  );
-});
 
 test("legacy migration preserves IDs, verifies Git content, and restarts without duplicate imports", async (t) => {
-  const { migrate } = await import("../apps/cli/dist/migrate.js");
+  const { migrate } = await import("../dist/storage/migrate.js");
   const root = await mkdtemp(join(tmpdir(), "orbit-migration-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const db = new SqliteDatabase(join(root, ".orbit", "history.sqlite")),
@@ -404,7 +241,7 @@ test("legacy migration preserves IDs, verifies Git content, and restarts without
   await original.close();
 });
 test("automatic publishing is opt-in, preserves offline commits, and resumes", async (t) => {
-  const { PublishWorker } = await import("../apps/cli/dist/publish.js");
+  const { PublishWorker } = await import("../dist/publishing/worker.js");
   const { root, repo } = await fixture(t);
   await repo.put(project.id, "event", event(0));
   const oid = await repo.checkpoint("Local only");
@@ -432,171 +269,6 @@ test("automatic publishing is opt-in, preserves offline commits, and resumes", a
   await git(repo.history, ["remote", "set-url", "origin", remote]);
   await worker.flush();
   assert.equal(await gitText(remote, ["rev-parse", "main"]), next);
-});
-test("standalone CLI serves its packaged portal and rejects foreign origins", async (t) => {
-  const { spawn } = await import("node:child_process");
-  const root = await mkdtemp(join(tmpdir(), "orbit-package-"));
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const cli = resolve("apps/cli/bundle/orbit.js");
-  await exec(process.execPath, [cli, "init"], { cwd: root });
-  const child = spawn(process.execPath, [cli, "serve"], {
-    cwd: root,
-    env: { ...process.env, ORBIT_PORT: "4328" },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let output = "";
-  child.stderr.on("data", (d) => (output += d));
-  child.stdout.on("data", (d) => (output += d));
-  t.after(async () => {
-    child.kill("SIGTERM");
-    await new Promise((r) => {
-      if (child.exitCode !== null) return r();
-      child.once("exit", r);
-    });
-  });
-  let response;
-  for (let i = 0; i < 100; i++) {
-    response = await fetch("http://127.0.0.1:4328/health").catch(() => null);
-    if (response?.ok) break;
-    if (child.exitCode !== null) break;
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.ok(response?.ok, output);
-  assert.match(
-    await (await fetch("http://127.0.0.1:4328/")).text(),
-    /assets\/index/,
-  );
-  const forbidden = await fetch("http://127.0.0.1:4328/api/v1/projects", {
-    headers: { origin: "https://foreign.example" },
-  });
-  assert.equal(forbidden.status, 403);
-});
-test(
-  "hosted PostgreSQL supports email ownership, Git registration, and revocation",
-  { skip: !process.env.ORBIT_TEST_DATABASE_URL },
-  async (t) => {
-    const { PostgresDatabase } = await import("../apps/api/dist/database.js");
-    const { randomBytes } = await import("node:crypto");
-    const admin = new PostgresDatabase(process.env.ORBIT_TEST_DATABASE_URL),
-      schema = "git_host_" + randomBytes(6).toString("hex");
-    await admin.query("CREATE SCHEMA " + schema);
-    const url = new URL(process.env.ORBIT_TEST_DATABASE_URL);
-    url.searchParams.set("options", "-c search_path=" + schema);
-    const db = new PostgresDatabase(url.toString());
-    await db.migrate();
-    const dir = await mkdtemp(join(tmpdir(), "orbit-git-pg-"));
-    let token;
-    const origin = "http://127.0.0.1:4329";
-    const app = await buildServer(db, {
-      origin,
-      repositoryRoot: dir,
-      sendEmail: async (_email, url) => {
-        token = new URL(url).searchParams.get("token");
-      },
-    });
-    t.after(async () => {
-      await app.close();
-      await db.close();
-      await admin.query("DROP SCHEMA " + schema + " CASCADE");
-      await admin.close();
-      await rm(dir, { recursive: true, force: true });
-    });
-    const sent = await app.inject({
-      method: "POST",
-      url: "/api/v1/auth/email/request",
-      headers: { origin },
-      payload: { email: "pg@example.test" },
-    });
-    assert.equal(sent.statusCode, 202, sent.body);
-    const signed = await app.inject({
-      method: "POST",
-      url: "/api/v1/auth/email/confirm",
-      headers: { origin },
-      payload: { token },
-    });
-    assert.equal(signed.statusCode, 200, signed.body);
-    const cookie = signed.cookies[0].name + "=" + signed.cookies[0].value;
-    const created = await app.inject({
-      method: "POST",
-      url: "/api/v1/projects",
-      headers: { origin, cookie },
-      payload: { id: project.id, name: project.name },
-    });
-    assert.equal(created.statusCode, 200, created.body);
-    const replay = await app.inject({
-      method: "POST",
-      url: "/api/v1/auth/email/confirm",
-      headers: { origin },
-      payload: { token },
-    });
-    assert.equal(replay.statusCode, 401);
-    await app.inject({
-      method: "POST",
-      url: "/api/v1/auth/logout",
-      headers: { origin, cookie },
-    });
-    assert.equal(
-      (await app.inject({ url: "/api/v1/projects", headers: { cookie } }))
-        .statusCode,
-      401,
-    );
-  },
-);
-
-test("checkpoint pagination reaches older history without moving its revision cursor", async (t) => {
-  const { repo, root } = await fixture(t);
-  const initial = await repo.checkpoint("Initial"),
-    tree = await gitText(repo.history, ["rev-parse", initial + "^{tree}"]);
-  let current = initial;
-  for (let i = 0; i < 61; i++)
-    current = await gitText(repo.history, [
-      "commit-tree",
-      tree,
-      "-p",
-      current,
-      "-m",
-      "Checkpoint " + i,
-    ]);
-  await git(repo.history, ["update-ref", "refs/heads/main", current]);
-  const db = new SqliteDatabase(":memory:");
-  const app = await buildServer(db, {
-    origin: "http://127.0.0.1:4340",
-    localRoot: root,
-    devAuth: true,
-  });
-  t.after(async () => {
-    await app.close();
-    await db.close();
-  });
-  const page = await app.inject({
-    url: "/api/v1/projects/" + project.id + "/checkpoints",
-  });
-  assert.equal(page.statusCode, 200, page.body);
-  assert.equal(page.json().items.length, 50);
-  const cursor = page.json().nextCursor;
-  assert.ok(cursor);
-  const next = await gitText(repo.history, [
-    "commit-tree",
-    tree,
-    "-p",
-    current,
-    "-m",
-    "New checkpoint",
-  ]);
-  await git(repo.history, ["update-ref", "refs/heads/main", next]);
-  const older = await app.inject({
-    url: "/api/v1/projects/" + project.id + "/checkpoints?cursor=" + cursor,
-  });
-  assert.equal(older.json().revision, current);
-  assert.equal(older.json().items.length, 12);
-  assert.equal(older.json().items.at(-1).oid, initial);
-  const forbidden = await app.inject({
-    method: "PATCH",
-    url: "/api/v1/projects/" + project.id + "?revision=" + initial,
-    headers: { origin: "http://127.0.0.1:4340" },
-    payload: { description: "not allowed" },
-  });
-  assert.equal(forbidden.statusCode, 409);
 });
 
 test("checkout validates untrusted branch entries before changing the working tree", async (t) => {
@@ -647,7 +319,7 @@ test("CLI continues a removed workstream from an earlier checkpoint on a new bra
   await exec(
     process.execPath,
     [
-      resolve("apps/cli/dist/index.js"),
+      resolve("bin/orbit.js"),
       "continue",
       work.id,
       "--agent",

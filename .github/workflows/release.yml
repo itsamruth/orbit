@@ -1,25 +1,35 @@
-name: Release CLI
-
+name: Release
 on:
-  push:
-    tags: ["v*"]
-
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish
+        required: true
 permissions:
   contents: read
-  id-token: write
-
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: npm-release
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
           cache: npm
+      - run: node scripts/check-release.mjs "$RELEASE_TAG"
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
       - run: npm ci
+      - run: npm run typecheck
+      - run: npm run format:check
       - run: npm test
-      - run: npm publish --workspace @orbit/cli --access public --provenance
+      - run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
