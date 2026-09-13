@@ -1,6 +1,6 @@
 {
   "name": "@itsamruth/orbit",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Git for AI agent conversations.",
   "type": "module",
   "license": "MIT",
