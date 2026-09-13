@@ -9,7 +9,20 @@ workstream with another agent without starting over.
 Claude Code and Codex are the first supported adapters. The conversation belongs
 to Orbit, not to either agent.
 
+## Install
+
+Orbit requires Node.js 22.14 or newer and Git. Install Claude Code or Codex
+separately, then install Orbit globally from npm:
+
 ```sh
+npm install -g @itsamruth/orbit
+orbit --version
+```
+
+## Quick start
+
+```sh
+cd your-project
 orbit init
 orbit claude
 
@@ -49,17 +62,7 @@ Project
 Switching agents creates a linked session in the same workstream. It does not copy
 the conversation into a second source of truth.
 
-## Install
-
-Orbit currently requires Node.js 22.14 or newer and Git. Install and authenticate
-Claude Code or Codex separately.
-
-```sh
-npm install --global @itsamruth/orbit
-orbit --version
-```
-
-### From source
+## Install from source
 
 ```sh
 git clone https://github.com/itsamruth/orbit.git
@@ -69,34 +72,6 @@ npm run build
 npm link
 orbit --version
 ```
-
-## Quick start
-
-Initialize Orbit from an existing project:
-
-```sh
-cd your-project
-orbit init
-```
-
-Launch an agent through Orbit so its conversation is captured:
-
-```sh
-orbit claude
-# or
-orbit codex
-```
-
-Exit the current agent normally, then continue the latest conversation:
-
-```sh
-orbit switch codex
-# or
-orbit switch claude
-```
-
-Orbit shows which conversation and source session it selected before launching the
-destination agent.
 
 ## Commands
 
