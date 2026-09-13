@@ -108,6 +108,15 @@ test("switch imports a plain Claude transcript and preserves it when switching b
     new Set(sessions.map((session) => session.workstreamId)).size,
     1,
   );
+  const allEvents = await repo.list(f.projectId, "event");
+  assert.ok(allEvents.every((event) => event.schemaVersion === 2));
+  assert.ok(!allEvents.some((event) => event.payload.type === "user_message" && /Orbit conversation continuation/.test(event.payload.text)));
+  const continued = sessions.filter((session) => session.continuation);
+  assert.equal(continued.length, 2);
+  assert.ok(continued.every((session) => session.bootstrapHash && session.normalizerVersion === 2));
+  const contextPage = JSON.parse((await f.run(["context", sessions[0].workstreamId, "--json", "--limit", "1"])).stdout);
+  assert.equal(contextPage.items.length, 1);
+  assert.ok(contextPage.nextCursor);
   const final = sessions.find(
     (session) => session.agent === "claude" && session.captureMode === "live",
   );

@@ -1,3 +1,4 @@
+import { captureNativeBatch } from "../adapters/shared/capture.js";
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
@@ -7,7 +8,6 @@ import { promisify } from "node:util";
 import { claudeAdapter } from "../adapters/claude/index.js";
 import { codexAdapter } from "../adapters/codex/index.js";
 import {
-  normalizeBatch,
   prefix,
   readRecords,
   type AgentAdapter,
@@ -49,12 +49,14 @@ type PrivateCandidate = {
 async function inspectNative(
   adapter: AgentAdapter,
   native: NativeSession,
+  excludedPaths = defaultPolicy.excludedPaths,
 ): Promise<{
   startedAt: string | null;
   firstPrompt: string | null;
   messageCount: number;
   branch: string | null;
 }> {
+  const previewFilter = new PolicyFilter();
   let position = 0;
   let startedAt: string | null = null;
   let firstPrompt: string | null = null;
@@ -76,7 +78,10 @@ async function inspectNative(
           : typeof raw?.payload?.git?.branch === "string"
             ? raw.payload.git.branch
             : null;
-      for (const payload of adapter.normalize(record.value)) {
+      for (let payload of adapter.normalize(record.value)) {
+        const preview = previewFilter.apply({ schemaVersion: 2, id: "preview", projectId: "preview", workstreamId: "preview", sessionId: native.id, sequence: 0, occurredAt: timestamp ?? "", payload }, { ...defaultPolicy, excludedPaths });
+        if (preview.action === "drop") continue;
+        payload = preview.event.payload;
         if (
           payload.type === "user_message" ||
           payload.type === "assistant_message"
@@ -107,7 +112,7 @@ async function discover(
       const sessionId = stableId("sess", projectId, id, native.id);
       const candidateId = stableId("candidate", projectId, id, native.id);
       const info = await stat(native.path);
-      const existing = await repo.get<Session>(projectId, "session", sessionId);
+      const existing = (await repo.list<Session>(projectId, "session")).find((s) => s.agent === id && s.nativeSessionId === native.id);
       const position = await repo.offset(native.path);
       const headHash = hash(
         (await prefix(native.path, 4096)).split("\n")[0] ?? "",
@@ -115,7 +120,7 @@ async function discover(
       const priorHead = await repo.state("import:head:" + sessionId);
       const conflict =
         position > info.size || Boolean(priorHead && priorHead !== headHash);
-      const details = await inspectNative(adapter, native);
+      const details = await inspectNative(adapter, native, (await repo.get<Project>(projectId, "project", projectId))?.excludedPaths);
       if (!details.messageCount) continue;
       result.push({
         adapter,
@@ -183,8 +188,9 @@ export async function importHistoricalSessions(
   const imported: Session[] = [];
   for (const item of selected) {
     const c = item.candidate;
-    const sessionId = stableId("sess", projectId, c.agent, c.nativeSessionId);
-    const workstreamId = stableId(
+    const prior = (await repo.list<Session>(projectId, "session")).find((s) => s.agent === c.agent && s.nativeSessionId === c.nativeSessionId);
+    const sessionId = prior?.id ?? stableId("sess", projectId, c.agent, c.nativeSessionId);
+    const workstreamId = prior?.workstreamId ?? stableId(
       "work",
       projectId,
       c.agent,
@@ -201,6 +207,7 @@ export async function importHistoricalSessions(
         id: workstreamId,
         projectId,
         title: c.firstPrompt ?? "Imported " + c.agent + " session",
+        titleSource: "automatic",
         branch: c.branch,
         createdAt: c.startedAt ?? c.updatedAt,
         updatedAt: c.updatedAt,
@@ -219,13 +226,11 @@ export async function importHistoricalSessions(
         startedAt: c.startedAt ?? c.updatedAt,
         endedAt: c.updatedAt,
         captureMode: "imported",
+        normalizerVersion: 2,
         importedAt: now,
       };
       await repo.put(projectId, "session", session);
     }
-    const filter = new PolicyFilter();
-    const savedFilter = await repo.state("filter:" + sessionId);
-    if (savedFilter) filter.restore(JSON.parse(savedFilter));
     let position = await repo.offset(item.native.path);
     let sequence = (
       await repo.list<UniversalEvent>(projectId, "event", sessionId)
@@ -234,30 +239,8 @@ export async function importHistoricalSessions(
     while (true) {
       const batch = await readRecords(item.native.path, position);
       if (batch.position === position) break;
-      const normalized = normalizeBatch(
-        item.adapter,
-        { projectId, workstreamId, sessionId },
-        batch.records,
-        sequence,
-        session.startedAt,
-      );
-      const kept: UniversalEvent[] = [];
-      for (const event of normalized) {
-        const filtered = filter.apply(event, {
-          ...defaultPolicy,
-          excludedPaths: project.excludedPaths,
-        });
-        if (filtered.action === "keep") {
-          if (Buffer.byteLength(JSON.stringify(filtered.event)) <= 256000)
-            kept.push(filtered.event);
-          else warnings++;
-        }
-      }
-      await repo.capture(projectId, item.native.path, batch.position, kept, {
-        key: "filter:" + sessionId,
-        value: JSON.stringify(filter.snapshot()),
-      });
-      sequence += normalized.length;
+      const captured = await captureNativeBatch(repo, item.adapter, session, item.native, batch, sequence, { ...defaultPolicy, excludedPaths: project.excludedPaths });
+      sequence = captured.nextSequence;
       position = batch.position;
       warnings += batch.malformed;
     }
@@ -273,7 +256,7 @@ export async function importHistoricalSessions(
       ...session,
       endedAt: c.updatedAt,
       sourceFingerprint,
-      captureMode: "imported",
+      captureMode: session.captureMode ?? "imported",
       importedAt: session.importedAt ?? now,
     };
     await repo.put(projectId, "session", session);

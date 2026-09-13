@@ -22,6 +22,7 @@ export interface Workstream {
   branch: string | null;
   createdAt: string;
   updatedAt: string;
+  titleSource?: "automatic" | "manual";
 }
 
 export interface Session {
@@ -37,6 +38,13 @@ export interface Session {
   captureMode?: "live" | "imported";
   importedAt?: string;
   sourceFingerprint?: string;
+  normalizerVersion?: number;
+  bootstrapHash?: string;
+  continuation?: {
+    sessionId: string;
+    throughEventId: string | null;
+    handoffId: string;
+  };
 }
 
 export interface EvidenceItem {
@@ -71,17 +79,30 @@ export interface SessionSummary {
   files: string[];
 }
 
+export type ToolStatus = "completed" | "failed" | "interrupted" | "unknown";
+export type TurnStatus = "active" | ToolStatus;
+export interface AttachmentReference {
+  type: "attachment";
+  reference: string;
+  mediaType: string;
+  availability: "referenced" | "unavailable";
+}
 export type EventPayload =
-  | { type: "user_message" | "assistant_message"; text: string }
+  | { type: "user_message" | "assistant_message"; text: string; content?: AttachmentReference[] }
   | { type: "tool_call"; callId: string; name: string; input: unknown }
-  | { type: "tool_result"; callId: string; output: string; failed: boolean }
+  | { type: "tool_result"; callId: string; output: string; failed: boolean; status?: ToolStatus; exitCode?: number | null }
   | { type: "command"; command: string; exitCode: number | null }
   | { type: "file_modified"; path: string }
   | { type: "git_state"; workspace: WorkspaceState }
-  | { type: "session_ended"; reason: string };
+  | { type: "session_ended"; reason: string }
+  | { type: "turn_state"; status: TurnStatus }
+  | { type: "context_summary"; text: string; coverage: "unknown" | "complete" | "truncated" }
+  | { type: "runtime_context"; reason: string }
+  | { type: "coverage"; reason: string }
+  | { type: "content_chunk"; text: string };
 
 export interface UniversalEvent {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   id: string;
   projectId: string;
   workstreamId: string;
@@ -90,6 +111,19 @@ export interface UniversalEvent {
   sequence: number;
   occurredAt: string;
   payload: EventPayload;
+  source?: {
+    adapter: string;
+    normalizerVersion: number;
+    nativeVersion: string;
+    recordId: string;
+    offset: number;
+    blockIndex: number;
+  };
+  messageId?: string;
+  turnId?: string;
+  phase?: "commentary" | "final" | "unknown";
+  coverage?: string[];
+  chunk?: { groupId: string; index: number; total: number };
 }
 
 export interface Handoff {

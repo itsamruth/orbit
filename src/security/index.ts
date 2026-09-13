@@ -77,7 +77,7 @@ export class PolicyFilter implements EventFilter {
     };
     return {
       action: "keep",
-      event: { ...event, payload: walk(p) as UniversalEvent["payload"] },
+      event: { ...event, payload: walk(p) as UniversalEvent["payload"], ...(event.schemaVersion === 2 && JSON.stringify(walk(p)) !== serialized ? { coverage: [...(event.coverage ?? []), "Secrets were redacted from captured content."] } : {}) },
     };
   }
 }

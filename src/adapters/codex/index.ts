@@ -1,3 +1,4 @@
+import { normalizeNative, bootstrapText } from "../shared/normalize.js";
 import { execFile } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -7,40 +8,7 @@ import type { EventPayload } from "../../domain/index.js";
 import { jsonlFiles, prefix, type AgentAdapter } from "../shared/index.js";
 const exec = promisify(execFile);
 export function normalizeCodex(record: unknown): EventPayload[] {
-  const r = record as any;
-  if (!r || r.type !== "response_item") return [];
-  const p = r.payload;
-  if (!p) return [];
-  if (p.type === "message" && ["user", "assistant"].includes(p.role)) {
-    const text = (p.content ?? [])
-      .filter((c: any) =>
-        ["input_text", "output_text", "text"].includes(c.type),
-      )
-      .map((c: any) => c.text ?? "")
-      .join("\n");
-    if (!text || text.startsWith("[Orbit capture")) return [];
-    return [
-      { type: p.role === "user" ? "user_message" : "assistant_message", text },
-    ];
-  }
-  if (p.type === "function_call" || p.type === "custom_tool_call") {
-    let input = p.arguments ?? p.input ?? "";
-    try {
-      input = JSON.parse(input);
-    } catch {}
-    return [{ type: "tool_call", callId: p.call_id, name: p.name, input }];
-  }
-  if (p.type === "function_call_output" || p.type === "custom_tool_call_output")
-    return [
-      {
-        type: "tool_result",
-        callId: p.call_id,
-        output:
-          typeof p.output === "string" ? p.output : JSON.stringify(p.output),
-        failed: false,
-      },
-    ];
-  return [];
+  return normalizeNative("codex", record).map((part) => part.payload);
 }
 export const codexAdapter: AgentAdapter = {
   id: "codex",
@@ -90,11 +58,7 @@ export const codexAdapter: AgentAdapter = {
   launchArgs({ marker, context, args }) {
     return [
       ...args,
-      "[Orbit capture " +
-        marker +
-        "]\n" +
-        (context ??
-          "Orbit is recording this project session. Wait for the developer to describe the task."),
+      bootstrapText(marker, context),
     ];
   },
 };

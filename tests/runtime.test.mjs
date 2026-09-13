@@ -205,22 +205,11 @@ test("handoff keeps original/latest objectives and complete tool pairs within bu
   assert.match(context, /tool_call/);
   assert.match(context, /tool_result/);
 });
-test("oversize objective fails explicitly instead of silently dropping it", () => {
-  assert.throws(
-    () =>
-      buildContext(
-        [event(0, { type: "user_message", text: "x".repeat(10000) })],
-        {
-          root: "/repo",
-          branch: null,
-          head: null,
-          porcelain: "",
-          dirty: false,
-        },
-        2048,
-      ),
-    /objective alone/,
-  );
+test("oversize objective uses an explicit excerpt while keeping context bounded", () => {
+  const { context, truncated } = buildContext([event(0, { type: "user_message", text: "x".repeat(10000) })], { root: "/repo", branch: null, head: null, porcelain: "", dirty: false }, 2048);
+  assert.ok(Buffer.byteLength(context) <= 2048);
+  assert.equal(truncated, true);
+  assert.match(context, /excerpt/);
 });
 test("JSONL reader waits for partial records and preserves UTF-8 byte offsets", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "orbit-jsonl-"));
@@ -336,14 +325,15 @@ test("recovery drains complete records and retains exclusion state across crashe
   );
   await recoverCapture(repo, "prj_test", session());
   const events = await repo.list("prj_test", "event");
-  assert.equal(events.length, 1);
-  assert.equal(events[0].payload.text, "Continue testing");
+  assert.equal(events.length, 2);
+  assert.equal(events[0].payload.type, "coverage");
+  assert.equal(events[1].payload.text, "Continue testing");
   assert.equal(
     JSON.stringify(await repo.pending("prj_test")).includes("PRIVATE_RESULT"),
     false,
   );
   await recoverCapture(repo, "prj_test", session());
-  assert.equal((await repo.list("prj_test", "event")).length, 1);
+  assert.equal((await repo.list("prj_test", "event")).length, 2);
 });
 test("handoff query bounds history while retaining original and latest user requests", async (t) => {
   const { repo } = await local(t);

@@ -1,0 +1,158 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { codexAdapter } from "../dist/adapters/codex/index.js";
+import { claudeAdapter } from "../dist/adapters/claude/index.js";
+import { normalizeBatch, readRecords } from "../dist/adapters/shared/index.js";
+import { normalizeNative, digest, bootstrapText } from "../dist/adapters/shared/normalize.js";
+import { splitEvent, captureNativeBatch } from "../dist/adapters/shared/capture.js";
+import { assembleEvents, readConversation } from "../dist/sessions/conversation.js";
+import { buildContextBundle } from "../dist/sessions/handoff/index.js";
+import { legacyEvents, legacySession, legacyWorkstream } from "../dist/publishing/legacy.js";
+import { PolicyFilter, defaultPolicy } from "../dist/security/index.js";
+import { Repository, SqliteDatabase, validateEntity } from "../dist/storage/journal/index.js";
+import { GitRepository, readSnapshot } from "../dist/storage/git/index.js";
+const exec = promisify(execFile);
+const now = "2026-09-13T10:00:00Z";
+const identity = { projectId: "prj_unified", workstreamId: "work_unified", sessionId: "sess_unified" };
+const workspace = { root: "/fixture", branch: null, head: null, porcelain: "", dirty: false };
+const work = { id: identity.workstreamId, projectId: identity.projectId, title: "Untitled workstream", titleSource: "automatic", branch: null, createdAt: now, updatedAt: now };
+const session = { id: identity.sessionId, projectId: identity.projectId, workstreamId: work.id, agent: "codex", nativeSessionId: "native-codex", status: "ended", startedAt: now, endedAt: now, normalizerVersion: 2 };
+const project = { id: identity.projectId, name: "Fixture", description: "", repository: null, owner: "local", createdAt: now, updatedAt: now, cloudSyncEnabled: false, excludedPaths: defaultPolicy.excludedPaths };
+function model(events, sessions = [session]) { return { projectId: project.id, workstream: work, sessions, records: events, events: assembleEvents(events), summaries: [], coverage: [] }; }
+async function fixture(name) { const text = await readFile(new URL("fixtures/" + name, import.meta.url), "utf8"); let offset = 0; return text.trimEnd().split("\n").map((line) => { const record = { value: JSON.parse(line), offset }; offset += Buffer.byteLength(line) + 1; return record; }); }
+async function local(t) { const db = new SqliteDatabase(":memory:"); t.after(() => db.close()); const repo = new Repository(db); await repo.put(project.id, "project", project); await repo.put(project.id, "workstream", work); await repo.put(project.id, "session", session); return repo; }
+test("Codex 0.154.0 casual conversation keeps replies, strips environment objective, and waits", async () => {
+  const events = normalizeBatch(codexAdapter, identity, await fixture("codex-0.154.0.jsonl"), 0, now);
+  events.forEach((e) => validateEntity("event", e, project.id));
+  const result = buildContextBundle(model(events), workspace);
+  assert.equal(result.bundle.status, "completed");
+  assert.equal(result.bundle.firstRequest, "hey");
+  assert.match(result.context, /I'm Codex/);
+  assert.match(result.context, /wait for the user's next message/);
+  assert.doesNotMatch(result.context, /<environment_context>|originalObjective|recentEvents|Continue the coding task/);
+});
+test("Claude 2.1.270 preserves option references, mixed blocks, tool status and chronology", async () => {
+  const events = normalizeBatch(claudeAdapter, identity, await fixture("claude-2.1.270.jsonl"), 0, now);
+  const result = buildContextBundle(model(events, [{ ...session, agent: "claude" }]), workspace);
+  assert.match(result.context, /option B is PostgreSQL/);
+  assert.match(result.context, /Use option B/);
+  const results = events.filter((e) => e.payload.type === "tool_result");
+  assert.deepEqual(results.map((e) => e.payload.status), ["failed", "completed"]);
+  assert.equal(events.filter((e) => e.payload.type === "user_message").length, 3);
+    const historicalExchanges = result.context.split("HISTORICAL EXCHANGES:\n\n")[1] ?? "";
+    assert.ok(historicalExchanges.indexOf("Tests failed") < historicalExchanges.indexOf("Do not change dependencies"));
+  assert.ok(result.context.indexOf("Do not change dependencies") < result.context.indexOf('"name":"fixture"'));
+});
+test("bootstrap identity and native identities prevent recursion without removing repeated real prompts", () => {
+  const text = bootstrapText("marker", "Orbit conversation continuation.\nHistorical exchanges");
+  const record = (id, text) => ({ type: "response_item", payload: { id, type: "message", role: "user", content: [{ type: "input_text", text }] } });
+  assert.equal(normalizeNative("codex", record("boot", text), digest(text)).length, 0);
+  assert.equal(normalizeNative("codex", record("quote", text + "\nPlease explain this"), digest(text)).length, 1);
+  const state = { version: 2, nativeVersion: "unknown", turnId: null, seen: [] };
+  const records = [{ value: record("a", "same"), offset: 0 }, { value: record("a", "same"), offset: 100 }, { value: record("b", "same"), offset: 200 }];
+  assert.equal(normalizeBatch(codexAdapter, identity, records, 0, now, state).length, 2);
+  assert.equal(normalizeBatch(codexAdapter, identity, records, 2, now, state).length, 0);
+});
+test("unknown outcomes, compaction and unavailable attachments are explicit", () => {
+  const unknown = normalizeNative("codex", { type: "response_item", payload: { type: "function_call_output", call_id: "c", output: "some output" } });
+  assert.equal(unknown[0].payload.status, "unknown");
+  const failure = normalizeNative("codex", { type: "response_item", payload: { type: "function_call_output", call_id: "c", output: '{"exit_code":1}' } });
+  assert.equal(failure[0].payload.status, "failed");
+  assert.equal(normalizeNative("codex", { type: "compacted" })[0].payload.type, "coverage");
+  const attachment = normalizeNative("claude", { type: "user", message: { content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: "PRIVATE_BINARY" } }] } });
+  assert.equal(attachment[0].payload.content[0].availability, "unavailable");
+  assert.doesNotMatch(JSON.stringify(attachment), /PRIVATE_BINARY/);
+});
+test("large records are filtered before chunking, reassembled exactly, and partial records wait", async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), "orbit-unified-")); t.after(() => rm(dir, { recursive: true, force: true }));
+  const file = join(dir, "large.jsonl");
+  const raw = { type: "response_item", payload: { type: "function_call_output", call_id: "c", output: "x".repeat(1100000) + " password=secret-value" } };
+  await writeFile(file, JSON.stringify(raw));
+  assert.equal((await readRecords(file, 0)).position, 0);
+  await writeFile(file, "\n", { flag: "a" });
+  const batch = await readRecords(file, 0);
+  assert.equal(batch.records.length, 1);
+  const event = normalizeBatch(codexAdapter, identity, batch.records, 0, now)[0];
+  const filtered = new PolicyFilter().apply(event, defaultPolicy).event;
+  const chunks = splitEvent(filtered).map((e, sequence) => ({ ...e, sequence }));
+  assert.ok(chunks.length > 1);
+  chunks.forEach((e) => { validateEntity("event", e, project.id); assert.ok(Buffer.byteLength(JSON.stringify(e)) < 256000); });
+  assert.deepEqual(assembleEvents(chunks)[0].payload, filtered.payload);
+  assert.doesNotMatch(JSON.stringify(chunks), /secret-value/);
+  assert.equal(assembleEvents(chunks.slice(1))[0].payload.type, "coverage");
+});
+test("capture state and privacy gaps are atomic and recovery does not duplicate", async (t) => {
+  const repo = await local(t);
+  const native = { id: session.nativeSessionId, projectRoot: "/fixture", path: "/fixture/native.jsonl" };
+  const records = [{ offset: 0, value: { type: "response_item", payload: { type: "function_call", call_id: "secret", name: "read", arguments: '{"path":".env"}' } } }];
+  const first = await captureNativeBatch(repo, codexAdapter, session, native, { records, position: 100, malformed: 0 }, 0, defaultPolicy);
+  assert.equal(first.events[0].payload.type, "coverage");
+  const second = await captureNativeBatch(repo, codexAdapter, session, native, { records: [{ offset: 100, value: { type: "response_item", payload: { type: "function_call_output", call_id: "secret", output: "PRIVATE_RESULT" } } }], position: 200, malformed: 0 }, first.nextSequence, defaultPolicy);
+  assert.equal(second.events[0].payload.type, "coverage");
+  assert.doesNotMatch(JSON.stringify(await repo.list(project.id, "event")), /PRIVATE_RESULT/);
+  const duplicate = await captureNativeBatch(repo, codexAdapter, session, native, { records, position: 200, malformed: 0 }, second.nextSequence, defaultPolicy);
+  assert.equal(duplicate.events.length, 0);
+});
+test("legacy reads preserve stored bytes and stale summaries are excluded", async (t) => {
+  const repo = await local(t);
+  const old = { schemaVersion: 1, id: "evt_old", ...identity, sequence: 0, occurredAt: now, payload: { type: "user_message", text: "<environment_context>\n<cwd>/fixture</cwd>\n<shell>bash</shell>\n</environment_context>\nKeep my real request" } };
+  await repo.put(project.id, "event", old);
+  await repo.put(project.id, "summary", { schemaVersion: 1, id: "summary_old", ...identity, provider: "codex", providerVersion: "fixture", model: null, promptVersion: 1, sourceHash: "0".repeat(64), generatedAt: now, coverage: "complete", title: "Old", overview: "Do not reuse", objectives: [], decisions: [], rejectedApproaches: [], openQuestions: [], tasks: [], files: [] });
+  const view = await readConversation(repo, project.id, work.id);
+  assert.equal(view.events[0].payload.text, "Keep my real request");
+  assert.equal(view.summaries.length, 0);
+  assert.deepEqual(await repo.get(project.id, "event", old.id), old);
+});
+test("version-1 projection preserves tool pairs and removes version-2 metadata", async () => {
+  const records = normalizeBatch(claudeAdapter, identity, await fixture("claude-2.1.270.jsonl"), 0, now);
+  const projected = legacyEvents(records);
+  projected.forEach((e) => { assert.equal(e.schemaVersion, 1); assert.equal(e.source, undefined); validateEntity("event", e, project.id); });
+  assert.deepEqual(projected.filter((e) => e.payload.type === "tool_call").map((e) => e.payload.callId).sort(), projected.filter((e) => e.payload.type === "tool_result").map((e) => e.payload.callId).sort());
+  assert.equal(legacySession(session).normalizerVersion, undefined);
+  assert.equal(legacyWorkstream(work).titleSource, undefined);
+});
+test("legacy redaction stays schema-compatible and publishing preserves large v1 records", () => {
+  const old = { schemaVersion: 1, id: "evt_legacy_large", ...identity, sequence: 0, occurredAt: now, payload: { type: "tool_result", callId: "legacy_call", output: "x".repeat(50000) + " password=secret-value", failed: false } };
+  const filtered = new PolicyFilter().apply(old, defaultPolicy);
+  assert.equal(filtered.action, "keep");
+  assert.equal(filtered.event.coverage, undefined);
+  validateEntity("event", filtered.event, project.id);
+  assert.doesNotMatch(filtered.event.payload.output, /secret-value/);
+  assert.deepEqual(legacyEvents([old]), [old]);
+  assert.deepEqual(legacyEvents([filtered.event]), [filtered.event]);
+});
+test("bounded context includes complete pairs and reports oversized messages without dropping stored content", async () => {
+  const records = normalizeBatch(claudeAdapter, identity, await fixture("claude-2.1.270.jsonl"), 0, now);
+  const large = { ...records[0], id: "evt_large", sequence: 999, messageId: "large", payload: { type: "user_message", text: "z".repeat(100000) } };
+  const result = buildContextBundle(model([...records, large]), workspace, 3000);
+  assert.ok(Buffer.byteLength(result.context) <= 3000);
+  assert.ok(result.bundle.omittedEventIds.includes("evt_large"));
+  assert.equal(large.payload.text.length, 100000);
+  const selected = result.bundle.events;
+  for (const event of selected.filter((e) => e.payload.type === "tool_result")) assert.ok(selected.some((c) => c.payload.type === "tool_call" && c.payload.callId === event.payload.callId));
+});
+test("version-2 checkpoints reload and read-only context pagination returns stable event cursors", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "orbit-context-cli-")); t.after(() => rm(root, { recursive: true, force: true }));
+  const cli = new URL("../bin/orbit.js", import.meta.url).pathname;
+  await exec(process.execPath, [cli, "init"], { cwd: root });
+  const config = JSON.parse(await readFile(join(root, ".orbit", "project.json"), "utf8"));
+  const repo = await GitRepository.open(root);
+  const w = { ...work, projectId: config.projectId }, s = { ...session, projectId: config.projectId };
+  await repo.put(config.projectId, "workstream", w); await repo.put(config.projectId, "session", s);
+  const events = normalizeBatch(codexAdapter, { ...identity, projectId: config.projectId }, await fixture("codex-0.154.0.jsonl"), 0, now);
+  for (const event of events) await repo.put(config.projectId, "event", event);
+  await repo.checkpoint("Unified fixture");
+  const snapshot = await readSnapshot(repo.history);
+  assert.equal(snapshot.records.filter((r) => r.kind === "event").length, events.length);
+  await repo.db.close();
+  const first = JSON.parse((await exec(process.execPath, [cli, "context", work.id, "--json", "--limit", "2"], { cwd: root })).stdout);
+  const second = JSON.parse((await exec(process.execPath, [cli, "context", work.id, "--json", "--limit", "2", "--cursor", first.nextCursor], { cwd: root })).stdout);
+  assert.ok(first.nextCursor);
+  assert.notEqual(first.items[0].id, second.items[0].id);
+  await assert.rejects(exec(process.execPath, [cli, "context", work.id, "--json", "--cursor", "other-project"], { cwd: root }), /cursor is not in this conversation/);
+});

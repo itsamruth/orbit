@@ -28,11 +28,12 @@ export const schema = [
 export class SqliteDatabase implements SqlDatabase {
   readonly raw: Database.Database;
   private tail: Promise<unknown> = Promise.resolve();
-  constructor(path: string) {
-    if (path !== ":memory:") {
+  constructor(path: string, readOnly = false) {
+    if (!readOnly && path !== ":memory:") {
       mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     }
-    this.raw = new Database(path);
+    this.raw = new Database(path, { readonly: readOnly, fileMustExist: readOnly });
+    if (readOnly) return;
     if (path !== ":memory:") chmodSync(path, 0o600);
     this.raw.pragma("foreign_keys = ON");
     this.raw.pragma("secure_delete = ON");

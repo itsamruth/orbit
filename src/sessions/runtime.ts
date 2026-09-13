@@ -1,3 +1,6 @@
+import { captureNativeBatch } from "../adapters/shared/capture.js";
+import { bootstrapText, digest } from "../adapters/shared/normalize.js";
+import { assembleEvents, readConversation } from "./conversation.js";
 import { spawn } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { chmod, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
@@ -8,7 +11,6 @@ import { createInterface } from "node:readline/promises";
 import { claudeAdapter } from "../adapters/claude/index.js";
 import { codexAdapter } from "../adapters/codex/index.js";
 import {
-  normalizeBatch,
   readRecords,
   type AgentAdapter,
   type NativeSession,
@@ -23,7 +25,7 @@ import type {
 import { PublishWorker } from "../publishing/worker.js";
 import { PolicyFilter, defaultPolicy } from "../security/index.js";
 import { GitRepository as Repository } from "../storage/git/index.js";
-import { buildContext, workspaceWarnings } from "./handoff/index.js";
+import { buildContextBundle, workspaceWarnings, type PreparedContext } from "./handoff/index.js";
 export const adapters: Record<string, AgentAdapter> = {
   codex: codexAdapter,
   claude: claudeAdapter,
@@ -110,6 +112,7 @@ export async function newWorkstream(
     id: "work_" + randomUUID(),
     projectId: pid,
     title,
+    titleSource: title === "Untitled workstream" ? "automatic" : "manual",
     branch: (await inspectWorkspace(root)).branch,
     createdAt: now,
     updatedAt: now,
@@ -118,39 +121,23 @@ export async function newWorkstream(
   await repo.setState("active:" + pid, w.id);
   return w;
 }
-export async function continueContext(
-  repo: Repository,
-  pid: string,
-  w: Workstream,
-  root: string,
-  budget: number,
-) {
-  const { events, truncated } = await repo.handoffEvents(pid, w.id);
-  if (
-    !events.some(
-      (e) =>
-        e.payload.type === "user_message" ||
-        e.payload.type === "assistant_message",
-    )
-  )
-    throw new Error(
-      "No captured conversation is available for this workstream. Start an agent normally before continuing.",
-    );
+export async function continueContext(repo: Repository, pid: string, w: Workstream, root: string, budget: number): Promise<PreparedContext> {
+  const conversation = await readConversation(repo, pid, w.id);
+  if (!conversation.events.some((e) => e.payload.type === "user_message" || e.payload.type === "assistant_message"))
+    throw new Error("No captured conversation is available for this workstream. Start an agent normally before continuing.");
   const workspace = await inspectWorkspace(root);
-  const previous = [...events]
-    .reverse()
-    .find((e) => e.payload.type === "git_state");
+  const previous = [...conversation.events].reverse().find((e) => e.payload.type === "git_state");
   if (previous?.payload.type === "git_state") {
     const warnings = workspaceWarnings(previous.payload.workspace, workspace);
-    if (warnings.length)
-      await confirm(warnings.join("\n") + " Continue in this workspace?");
+    if (warnings.length) await confirm(warnings.join("\n") + " Continue in this workspace?");
   }
-  const handoff = buildContext(events, workspace, budget, truncated);
-  if (handoff.truncated)
-    console.error(
-      "Orbit: context is limited to the original goal, latest request, and recent history that fits this agent's context budget.",
-    );
-  return handoff.context;
+  const prepared = buildContextBundle(conversation, workspace, budget);
+  const dir = join(root, ".orbit", "handoffs", prepared.bundle.id);
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  await writeFile(join(dir, "manifest.json"), JSON.stringify(prepared.bundle) + "\n", { mode: 0o600 });
+  await writeFile(join(dir, "context.md"), prepared.context + "\n", { mode: 0o600 });
+  if (prepared.bundle.omittedEventIds.length) console.error("Orbit: " + prepared.bundle.omittedEventIds.length + " events are outside the prompt budget. Full captured history remains available through orbit context.");
+  return prepared;
 }
 type Owner = {
   socket: string;
@@ -210,7 +197,7 @@ export async function runAgent(
   root: string,
   w: Workstream,
   agent: AgentAdapter,
-  context?: string,
+  context?: PreparedContext,
 ) {
   const dir = join(root, ".orbit");
   const ownerPath = join(dir, "process.json");
@@ -228,6 +215,9 @@ export async function runAgent(
     startedAt: now,
     endedAt: null,
     captureMode: "live",
+    normalizerVersion: 2,
+    bootstrapHash: digest(bootstrapText(marker, context?.context)),
+    ...(context?.bundle.previousSessionId ? { continuation: { sessionId: context.bundle.previousSessionId, throughEventId: context.bundle.throughEventId, handoffId: context.bundle.id } } : {}),
   };
   const origin = await repo.state("continue:origin");
   if (origin) {
@@ -273,7 +263,8 @@ export async function runAgent(
   let lastCheckpoint = Date.now();
   async function append(payload: UniversalEvent["payload"]) {
     const e: UniversalEvent = {
-      schemaVersion: 1,
+      schemaVersion: 2,
+      source: { adapter: "orbit", normalizerVersion: 2, nativeVersion: "1", recordId: "runtime:" + sequence, offset: 0, blockIndex: 0 },
       id: "evt_" + randomUUID(),
       projectId: pid,
       workstreamId: w.id,
@@ -320,29 +311,12 @@ export async function runAgent(
             batch.malformed +
             " malformed native records; capture is incomplete.",
         );
-      const normalized = normalizeBatch(
-        agent,
-        { projectId: pid, workstreamId: w.id, sessionId },
-        batch.records,
-        sequence,
-        now,
-      );
       const project = await repo.get<Project>(pid, "project", pid);
       if (!project) throw new Error("Project history was deleted");
-      const kept: UniversalEvent[] = [];
-      for (const event of normalized) {
-        const result = filter.apply(event, {
-          ...defaultPolicy,
-          excludedPaths: project.excludedPaths,
-        });
-        if (result.action === "keep") kept.push(result.event);
-      }
-      await repo.capture(pid, native.path, batch.position, kept, {
-        key: "filter:" + sessionId,
-        value: JSON.stringify(filter.snapshot()),
-      });
-      sequence += normalized.length;
-      const objective = kept.find((e) => e.payload.type === "user_message");
+      const captured = await captureNativeBatch(repo, agent, session, native, batch, sequence, { ...defaultPolicy, excludedPaths: project.excludedPaths });
+      const kept = captured.events;
+      sequence = captured.nextSequence;
+      const objective = assembleEvents(kept).find((e) => e.payload.type === "user_message");
       if (kept.length) {
         w = {
           ...w,
@@ -449,7 +423,7 @@ export async function runAgent(
         nativeId,
         marker,
         args: [],
-        ...(context ? { context } : {}),
+        ...(context ? { context: context.context } : {}),
       }),
       { cwd: root, stdio: "inherit", shell: false },
     );
@@ -517,7 +491,7 @@ export async function runAgent(
       updatedAt: new Date().toISOString(),
     });
     await repo.checkpoint("Session " + session.status + ": " + w.title);
-    if (session.status === "ended") {
+    if (session.status === "ended" && !stopping && !context) {
       try {
         const intelligence = await import("../intelligence/memory.js");
         const settings = await intelligence.getIntelligenceSettings(repo);
@@ -571,58 +545,21 @@ export async function runAgent(
   }
 }
 
-export async function recoverCapture(
-  repo: Repository,
-  pid: string,
-  session: Session,
-) {
+export async function recoverCapture(repo: Repository, pid: string, session: Session) {
   const raw = await repo.state("native:" + session.id);
   if (!raw) return;
   const native = JSON.parse(raw) as NativeSession;
   const adapter = adapters[session.agent];
   if (!adapter) throw new Error("Unsupported recovery adapter");
-  const filter = new PolicyFilter();
-  filter.restore(
-    JSON.parse((await repo.state("filter:" + session.id)) ?? "[]"),
-  );
-  let sequence = (
-    await repo.list<UniversalEvent>(pid, "event", session.id)
-  ).reduce((max, e) => Math.max(max, e.sequence + 1), 0);
+  let sequence = (await repo.list<UniversalEvent>(pid, "event", session.id)).reduce((max, e) => Math.max(max, e.sequence + 1), 0);
   while (true) {
     const offset = await repo.offset(native.path);
     const batch = await readRecords(native.path, offset);
     if (batch.position === offset) break;
-    const p = await repo.get<Project>(pid, "project", pid);
-    if (!p) throw new Error("Project was deleted");
-    const normalized = normalizeBatch(
-      adapter,
-      {
-        projectId: pid,
-        workstreamId: session.workstreamId,
-        sessionId: session.id,
-      },
-      batch.records,
-      sequence,
-      session.startedAt,
-    );
-    const kept: UniversalEvent[] = [];
-    for (const event of normalized) {
-      const result = filter.apply(event, {
-        ...defaultPolicy,
-        excludedPaths: p.excludedPaths,
-      });
-      if (result.action === "keep") kept.push(result.event);
-    }
-    await repo.capture(pid, native.path, batch.position, kept, {
-      key: "filter:" + session.id,
-      value: JSON.stringify(filter.snapshot()),
-    });
-    sequence += normalized.length;
-    if (batch.malformed)
-      console.error(
-        "Orbit: recovered complete records; " +
-          batch.malformed +
-          " malformed records were skipped.",
-      );
+    const project = await repo.get<Project>(pid, "project", pid);
+    if (!project) throw new Error("Project was deleted");
+    const captured = await captureNativeBatch(repo, adapter, session, native, batch, sequence, { ...defaultPolicy, excludedPaths: project.excludedPaths });
+    sequence = captured.nextSequence;
+    if (batch.malformed) console.error("Orbit: malformed records were recorded as coverage gaps during recovery.");
   }
 }

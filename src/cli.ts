@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { contextCommand } from "./commands/context-reader.js";
 import {
   access,
   appendFile,
@@ -37,6 +38,7 @@ const help = [
   "orbit switch <codex|claude>        Continue the latest project conversation in that agent",
   "orbit commit -m <message>          Create a named checkpoint",
   "orbit log | history | status",
+  "orbit context <workstream> [--json] [--cursor <event-id>] [--limit <1-100>]",
   "orbit diff <from> <to>",
   "orbit branch <name> [checkpoint]",
   "orbit checkout <branch>",
@@ -203,6 +205,10 @@ async function main() {
         "Existing history detected. Run orbit migrate --dry-run, then orbit migrate.",
       );
     await ignoreSource(root);
+  }
+  if (command === "context") {
+    await contextCommand(root, pid, args);
+    return;
   }
   const repo = await GitRepository.open(root, command === "init");
   try {

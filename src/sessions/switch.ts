@@ -1,3 +1,4 @@
+import { readConversation } from "./conversation.js";
 import type { Session, Workstream } from "../protocol/index.js";
 import type { GitRepository } from "../storage/git/index.js";
 import { recoverCapture } from "./runtime.js";
@@ -18,7 +19,8 @@ export async function latestConversation(
   const workstreams = await repo.list<Workstream>(projectId, "workstream");
   const conversations: Conversation[] = [];
   for (const workstream of workstreams) {
-    const { events } = await repo.handoffEvents(projectId, workstream.id);
+    const conversation = await readConversation(repo, projectId, workstream.id);
+    const events = conversation.events;
     for (const session of sessions.filter(
       (item) => item.workstreamId === workstream.id,
     )) {
@@ -38,7 +40,7 @@ export async function latestConversation(
       );
       conversations.push({
         session,
-        workstream,
+        workstream: conversation.workstream,
         updatedAt: new Date(timestamp).toISOString(),
       });
     }
@@ -101,7 +103,7 @@ export async function latestConversation(
     );
     if (!workstream)
       throw new Error("The latest conversation's workstream is missing.");
-    latest = { session, workstream, updatedAt: native.updatedAt };
+    latest = { session, workstream: (await readConversation(repo, projectId, workstream.id)).workstream, updatedAt: native.updatedAt };
   }
   if (!latest)
     throw new Error(

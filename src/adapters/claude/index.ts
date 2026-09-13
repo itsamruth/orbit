@@ -1,3 +1,4 @@
+import { normalizeNative, bootstrapText } from "../shared/normalize.js";
 import { execFile } from "node:child_process";
 import { homedir } from "node:os";
 import { basename, join } from "node:path";
@@ -6,43 +7,7 @@ import type { EventPayload } from "../../domain/index.js";
 import { jsonlFiles, prefix, type AgentAdapter } from "../shared/index.js";
 const exec = promisify(execFile);
 export function normalizeClaude(record: unknown): EventPayload[] {
-  const r = record as any;
-  if (!r || !["user", "assistant"].includes(r.type) || !r.message) return [];
-  const content = r.message.content;
-  if (typeof content === "string")
-    return content.startsWith("[Orbit capture")
-      ? []
-      : [
-          {
-            type: r.type === "user" ? "user_message" : "assistant_message",
-            text: content,
-          },
-        ];
-  if (!Array.isArray(content)) return [];
-  const out: EventPayload[] = [];
-  for (const c of content) {
-    if (c.type === "text" && !c.text.startsWith("[Orbit capture"))
-      out.push({
-        type: r.type === "user" ? "user_message" : "assistant_message",
-        text: c.text,
-      });
-    if (c.type === "tool_use")
-      out.push({
-        type: "tool_call",
-        callId: c.id,
-        name: c.name,
-        input: c.input,
-      });
-    if (c.type === "tool_result")
-      out.push({
-        type: "tool_result",
-        callId: c.tool_use_id,
-        output:
-          typeof c.content === "string" ? c.content : JSON.stringify(c.content),
-        failed: c.is_error === true,
-      });
-  }
-  return out;
+  return normalizeNative("claude", record).map((part) => part.payload);
 }
 export const claudeAdapter: AgentAdapter = {
   id: "claude",
@@ -98,11 +63,7 @@ export const claudeAdapter: AgentAdapter = {
       "--session-id",
       nativeId,
       ...args,
-      "[Orbit capture " +
-        marker +
-        "]\n" +
-        (context ??
-          "Orbit is recording this project session. Wait for the developer to describe the task."),
+      bootstrapText(marker, context),
     ];
   },
 };

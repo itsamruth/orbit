@@ -1,3 +1,4 @@
+import { validateEventRecord } from "../../domain/validation.js";
 import { createHash, randomUUID } from "node:crypto";
 import type {
   Change,
@@ -62,6 +63,7 @@ export function validateEntity(
       "excludedPaths",
     ],
     workstream: [
+      "titleSource",
       "id",
       "projectId",
       "title",
@@ -70,6 +72,7 @@ export function validateEntity(
       "updatedAt",
     ],
     session: [
+      "normalizerVersion", "bootstrapHash", "continuation",
       "id",
       "projectId",
       "workstreamId",
@@ -84,6 +87,7 @@ export function validateEntity(
       "sourceFingerprint",
     ],
     event: [
+      "source", "messageId", "turnId", "phase", "coverage", "chunk",
       "schemaVersion",
       "id",
       "projectId",
@@ -130,6 +134,14 @@ export function validateEntity(
     timestamp("updatedAt");
   }
   if (kind === "session") {
+    if (o.normalizerVersion !== undefined && o.normalizerVersion !== 2) fail("Unsupported normalizer version");
+    if (o.bootstrapHash !== undefined && (typeof o.bootstrapHash !== "string" || !/^[a-f0-9]{64}$/.test(o.bootstrapHash))) fail("Invalid bootstrap hash");
+    if (o.continuation !== undefined) {
+      const c = o.continuation as Record<string, unknown>;
+      if (!c || typeof c !== "object" || Object.keys(c).some((k) => !["sessionId", "throughEventId", "handoffId"].includes(k))) fail("Invalid continuation");
+      id(c, "sessionId"); id(c, "handoffId");
+      if (c.throughEventId !== null) id(c, "throughEventId");
+    }
     timestamp("startedAt");
     if (o.endedAt !== null) timestamp("endedAt");
   }
@@ -151,6 +163,7 @@ export function validateEntity(
     if (o.projectId !== projectId) fail("Project mismatch");
   }
   if (kind === "workstream") {
+    if (o.titleSource !== undefined && !["automatic", "manual"].includes(o.titleSource as string)) fail("Invalid title source");
     text(o, "title", 200);
     if (o.branch !== null && typeof o.branch !== "string")
       fail("Invalid branch");
@@ -189,76 +202,7 @@ export function validateEntity(
       fail("Invalid source fingerprint");
   }
   if (kind === "event") {
-    id(o, "workstreamId");
-    id(o, "sessionId");
-    if (
-      o.schemaVersion !== 1 ||
-      !Number.isSafeInteger(o.sequence) ||
-      (o.sequence as number) < 0
-    )
-      fail("Invalid event sequence or schema");
-    text(o, "occurredAt", 100);
-    const p = o.payload as Record<string, unknown>;
-    if (!p || typeof p !== "object") fail("Invalid event payload");
-    const payloadFields: Record<string, string[]> = {
-      user_message: ["type", "text"],
-      assistant_message: ["type", "text"],
-      tool_call: ["type", "callId", "name", "input"],
-      tool_result: ["type", "callId", "output", "failed"],
-      command: ["type", "command", "exitCode"],
-      file_modified: ["type", "path"],
-      git_state: ["type", "workspace"],
-      session_ended: ["type", "reason"],
-    };
-    if (
-      !payloadFields[String(p.type)] ||
-      Object.keys(p).some(
-        (key) => !payloadFields[String(p.type)]!.includes(key),
-      )
-    )
-      fail("Unsupported event fields");
-    switch (p.type) {
-      case "user_message":
-      case "assistant_message":
-        if (typeof p.text !== "string") fail("Invalid message");
-        break;
-      case "tool_call":
-        text(p, "callId", 200);
-        text(p, "name", 200);
-        if (!("input" in p)) fail("Missing tool input");
-        break;
-      case "tool_result":
-        text(p, "callId", 200);
-        if (typeof p.output !== "string" || typeof p.failed !== "boolean")
-          fail("Invalid tool result");
-        break;
-      case "command":
-        text(p, "command", 200000);
-        if (p.exitCode !== null && !Number.isInteger(p.exitCode))
-          fail("Invalid exit code");
-        break;
-      case "file_modified":
-        text(p, "path", 10000);
-        break;
-      case "git_state": {
-        const w = p.workspace as Record<string, unknown>;
-        if (
-          !w ||
-          typeof w.root !== "string" ||
-          typeof w.porcelain !== "string" ||
-          typeof w.dirty !== "boolean" ||
-          (w.branch !== null && typeof w.branch !== "string") ||
-          (w.head !== null && typeof w.head !== "string")
-        )
-          fail("Invalid workspace");
-        break;
-      }
-      case "session_ended":
-        text(p, "reason", 1000);
-        break;
-      default:
-        fail("Unsupported event type");
-    }
+    try { validateEventRecord(o); } catch (error) { fail(error instanceof Error ? error.message : String(error)); }
   }
   if (kind === "summary") {
     id(o, "workstreamId");

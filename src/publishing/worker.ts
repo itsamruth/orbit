@@ -1,3 +1,4 @@
+import { legacyEvents, legacySession, legacyWorkstream } from "./legacy.js";
 import { chmod, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cloud, credentials, serverUrl } from "../auth/device.js";
@@ -60,14 +61,14 @@ export async function buildPublishProjection(source: GitRepository) {
   );
   for (const workstream of await source.list<Workstream>(pid, "workstream"))
     if (workstreamIds.has(workstream.id))
-      await putChanged(target, pid, "workstream", workstream);
+      await putChanged(target, pid, "workstream", legacyWorkstream(workstream));
   for (const session of sourceSessions) {
-    await putChanged(target, pid, "session", session);
-    for (const event of await source.list<UniversalEvent>(
+    await putChanged(target, pid, "session", legacySession(session));
+    for (const event of legacyEvents(await source.list<UniversalEvent>(
       pid,
       "event",
       session.id,
-    ))
+    )))
       await putChanged(target, pid, "event", event);
     for (const summary of await source.list<SessionSummary>(
       pid,

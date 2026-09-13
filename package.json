@@ -20,7 +20,7 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "test:unit": "node --test tests/project.test.mjs tests/runtime.test.mjs",
+    "test:unit": "node --test tests/project.test.mjs tests/runtime.test.mjs tests/unified.test.mjs",
     "test:integration": "node --test tests/cli.test.mjs tests/switch.test.mjs tests/git.test.mjs tests/memory.test.mjs tests/package.test.mjs",
     "format": "prettier --write src bin scripts tests docs *.md *.json .github/workflows/*.yml",
     "format:check": "prettier --check src bin scripts tests docs *.md *.json .github/workflows/*.yml",

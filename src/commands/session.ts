@@ -1,3 +1,4 @@
+import type { PreparedContext } from "../sessions/handoff/index.js";
 import { randomUUID } from "node:crypto";
 import { inspectWorkspace } from "../project/index.js";
 import {
@@ -79,7 +80,7 @@ export async function sessionCommand({
   }
   await repo.assertIdle();
   let w = at ? null : await choose(repo, pid, root, explicit),
-    context: string | undefined;
+    context: PreparedContext | undefined;
   if (at) {
     await repo.assertIdle();
     const branch = "continue/" + Date.now() + "-" + randomUUID().slice(0, 8);
