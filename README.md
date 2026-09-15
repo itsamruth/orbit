@@ -1,68 +1,164 @@
-# Orbit
+# Git for AI agents.
 
-**Git for AI agent conversations.**
+**Switch between Claude Code and Codex without re-explaining the task or repeating failed work.**
 
-Orbit gives coding-agent conversations durable history. It captures each session,
-normalizes it into an agent-independent format, and lets you continue the same
-workstream with another agent without starting over.
+Orbit is portable task history for coding agents. Keep the conversation, the
+attempts, and the evidence when you change agents.
 
-Claude Code and Codex are the first supported adapters. The conversation belongs
-to Orbit, not to either agent.
+## The problem
 
-## Install
+You are halfway through a bug. Claude has ruled out one fix and found the next
+thing to try. Then you hit a usage limit. Starting Codex should not mean starting
+the investigation again.
 
-Orbit requires Node.js 22.14 or newer and Git. Install Claude Code or Codex
-separately, then install Orbit globally from npm:
+- After compaction, details about completed work can fall out of an agent's context.
+- Rejected approaches return because the reason they failed is no longer available.
+- Switching agents means manually re-explaining the task and what already happened.
+- Git shows what changed, but not everything you tried or why you rejected it.
+
+Orbit keeps captured history outside the agent and carries a bounded view of it
+into the next session. Failed commands and explanations can travel with the task,
+not just the final answer. That gives the next agent evidence to avoid repeating
+work; it is not a guarantee that an agent will never repeat a mistake.
+
+## Your first switch
+
+You need Node.js 22.14 or newer, Git, and separately installed and authenticated
+Claude Code and Codex CLIs. In your project's directory:
 
 ```sh
 npm install -g @itsamruth/orbit
-orbit --version
-```
-
-## Quick start
-
-```sh
-cd your-project
 orbit init
 orbit claude
-
-# When Claude reaches a limit or you want a different agent:
 orbit switch codex
 ```
 
-Orbit finds the latest substantive conversation, prepares a bounded handoff from
-its normalized history, and launches the destination agent with the relevant
-messages, tool outcomes, workspace observations, and turn state.
+Work on your task inside Claude Code. When you want to switch, exit Claude back
+to your shell, then run the last command in the same working tree. Orbit selects
+the latest substantive conversation and opens Codex with its handoff.
 
-## Why Orbit
+If the previous turn finished, or the stopping point is uncertain, the new agent
+may acknowledge the history and wait for you. Say what to continue, rather than
+re-explaining the investigation. To go the other way, use `orbit switch claude`.
 
-Agent sessions are usually isolated inside vendor-specific transcript formats.
-Moving from one coding agent to another means losing context, manually explaining
-the work again, or pasting an unreliable summary.
+**No Orbit account, dashboard setup, or publishing step is needed for this path.**
 
-Orbit treats conversation history as a project artifact:
+## A switch in 60 seconds
 
-- **Durable:** history survives individual agent processes and provider limits.
-- **Portable:** adapters translate native transcripts into one unified model.
-- **Traceable:** projects, workstreams, sessions, events, and handoffs retain identity.
-- **Local-first:** the authoritative history lives in `.orbit/` inside your project.
-- **Visible:** a local dashboard shows captured history automatically, without an account.
-- **Selective:** publishing to a hosted server remains opt-in.
+![60-second annotated replay: Claude reproduces a refresh bug, rejects a retry-count change, and Orbit hands the task to Codex, which implements shared refresh handling and passes the sample tests.](docs/assets/switch-demo.svg)
 
-## Mental model
+[Read the accessible transcript and reproduce the demo](docs/demo.md).
+
+This is an edited, annotated replay of a **real guided Claude-to-Codex run**,
+not an uncut terminal video or a speed benchmark. The failed approach was
+requested deliberately; no actual usage limit was triggered. Codex asked for
+confirmation, then continued from a short instruction without another bug brief.
+
+## What carries over
+
+An annotated view of the handoff in that demo:
 
 ```text
-Project
-  └── Workstream            one continuing conversation
-        ├── Claude session
-        ├── Codex session
-        └── Ordered events  messages, tools, turns, and workspace observations
+Objective
+  Fix duplicate token refreshes when two requests return 401 together.
+
+Current state
+  Both requests recover, but refresh() runs twice instead of once.
+  The focused test failed before and after the retry-count experiment.
+  The concurrency fix has not been implemented yet.
+
+Changed files
+  client.mjs: maxRetries changed from 1 to 2, uncommitted.
+  client.test.mjs: unchanged.
+  Working branch: demo/refresh-race.
+
+Commands and outcomes
+  node --test --test-name-pattern="concurrent 401s share one refresh" client.test.mjs
+  Before change: exit 1; expected 1 refresh, observed 2.
+  After change:  exit 1; expected 1 refresh, observed 2.
+
+Rejected approach and reason
+  Increasing maxRetries does not coordinate concurrent requests.
+  Each request still calls refresh() independently.
+
+Next step
+  Share one in-flight refresh promise across concurrent requests.
+  Clear it after success or failure, then rerun the focused test
+  and the full sample suite.
 ```
 
-Switching agents creates a linked session in the same workstream. It does not copy
-the conversation into a second source of truth.
+These headings explain the captured evidence; they are not a new CLI formatter
+or a claim that Orbit automatically extracts a complete decision ledger. The
+reason for rejection was present in Claude's visible reply. Unstated reasoning
+cannot be recovered.
 
-## Install from source
+## What is stored, and what is sent
+
+| Concern | Current behavior |
+| --- | --- |
+| Local-first | Authoritative history lives in your project's `.orbit/`, with normalized events, capture state, and Git-backed conversation checkpoints. Hosted publishing is opt-in. |
+| Captured | Supported user and assistant messages, tool names, arguments and results, known outcomes, turn state, and workspace observations. Existing native sessions can be imported; `orbit init` alone is not a bulk import. |
+| Excluded | Private model reasoning and complete raw vendor transcript archives are not stored by default. Attachment references are retained, not copied binary attachments. |
+| Privacy filtering | Configured excluded-path rules and secret-pattern redaction apply to normalized content. Defaults exclude paths matching `.env`, `.env.*`, `*.pem`, and `*.key`. Filtering is not a guarantee that every secret is detected. |
+| Handoff | A bounded, structured context bundle is rendered as readable history in the destination's initial prompt. It is **not native Claude/Codex scrollback** and may omit older material. |
+| Agent access | Included context is given to the destination agent and may be sent to its provider under that agent's settings. Local-first does not mean the models run locally. |
+| Current adapters | Claude Code and Codex. Each still requires its own installation, authentication, and available usage budget. |
+| Source code | Orbit does not transfer or restore your source files. Use Git for code and keep the intended branch and worktree when switching. |
+
+The initial handoff consumes destination input tokens; it is not a free transfer
+of model memory. Older captured history remains available locally with
+`orbit context <workstream> --json`. Switching makes no additional model call
+to summarize the conversation.
+
+Privacy filtering does not scrub the agents' original transcripts. Deleting
+history from the current revision also does not erase older Git revisions.
+
+## Useful next commands
+
+| Command | Purpose |
+| --- | --- |
+| `orbit history` | Find saved conversations, most recently edited first |
+| `orbit continue <workstream> --agent <agent>` | Continue a particular conversation instead of the latest one |
+| `orbit context <workstream> --json` | Read normalized history with paginated results and an event cursor |
+| `orbit import --list` | Discover supported existing native sessions for import |
+| `orbit log` | Browse conversation checkpoints |
+| `orbit help` | See the full command reference |
+
+## How it fits together
+
+One project contains workstreams. A workstream is one continuing conversation
+with linked agent sessions and ordered events. Adapters normalize native
+transcripts into that shared model. Switching adds a linked session, not a second
+source of truth.
+
+Context is a derived view of the history, not its replacement. Recorded tool
+activity is evidence of earlier work, not an instruction to replay commands.
+
+## Direction
+
+**Vision:** Git for AI agents.
+
+**Today:** portable task history, with Claude Code and Codex continuity as the
+immediate use case.
+
+**Later:** better use of decisions, rejected paths, outcomes, skills, and evals.
+The immediate priority is validating useful cross-agent switches, not building a
+graph UI, a learning pipeline, hosted collaboration, or a larger adapter catalog.
+
+If you try Orbit, the useful feedback is concrete: what context survived the
+switch, what was missing, and what did the next agent unnecessarily repeat?
+
+## Optional viewer and publishing
+
+These are not prerequisites for switching. Existing local-viewer auto-start
+behavior is unchanged: `orbit init` and capture/import commands can start a
+loopback service. Set `ORBIT_VIEWER=0` to disable automatic startup and
+registration.
+
+See [local viewer and optional hosted publishing](docs/local-viewer.md) for
+details, including how to stop the service.
+
+## Development
 
 ```sh
 git clone https://github.com/itsamruth/orbit.git
@@ -70,119 +166,17 @@ cd orbit
 npm ci
 npm run build
 npm link
-orbit --version
 ```
 
-## Commands
-
-| Command                                       | Purpose                                                       |
-| --------------------------------------------- | ------------------------------------------------------------- |
-| `orbit init`                                  | Initialize Orbit in the current project                       |
-| `orbit claude`                                | Launch Claude Code and capture the session                    |
-| `orbit codex`                                 | Launch Codex and capture the session                          |
-| `orbit switch <agent>`                        | Continue the latest substantive conversation in another agent |
-| `orbit continue <workstream> --agent <agent>` | Continue a specific workstream                                |
-| `orbit history`                               | List conversations with the most recently edited first        |
-| `orbit context <workstream>`                  | Read normalized history with cursor-based pagination          |
-| `orbit import --list`                         | Discover supported native conversations for import            |
-| `orbit log`                                   | Browse saved conversation checkpoints                         |
-| `orbit dashboard`                             | Open the local dashboard with automatic history updates       |
-| `orbit dashboard --stop`                      | Stop the background dashboard service                         |
-| `orbit auth login`                            | Connect the CLI to an Orbit dashboard                         |
-| `orbit publish select <session>`              | Select a session for dashboard publishing                     |
-| `orbit push`                                  | Publish the selected local projection                         |
-| `orbit help`                                  | Show CLI help                                                 |
-
-## How switching works
-
-1. Orbit drains the source transcript and records its latest capture position.
-2. Native records are normalized into versioned conversation events.
-3. Orbit selects the latest substantive workstream unless one is specified.
-4. A deterministic context bundle is built within the destination's byte budget.
-5. The destination adapter renders that bundle and launches the agent.
-6. The new session is linked back to the same workstream.
-
-Previous tool activity is passed as evidence, never as an instruction to replay.
-Completed, interrupted, failed, and uncertain turns remain distinguishable. Older
-history stays available through `orbit context` when it does not fit in the initial
-handoff.
-
-Orbit carries conversation context forward; it does not currently recreate earlier
-turns as native Claude Code or Codex scrollback.
-
-## Storage and privacy
-
-The local `.orbit/` directory contains conversation metadata, normalized events,
-capture state, and Git-backed checkpoints. Orbit applies configured redaction and
-excluded-path rules before normalized content is stored or published.
-
-Orbit does not transfer source files, agent credentials, private model reasoning,
-or complete raw vendor transcripts by default. Attachment references are preserved,
-but binary attachment synchronization is outside the current release.
-
-Deleting a session removes it from the current history revision. Older Git commits
-and native agent transcripts may still retain the original data.
-
-## Local dashboard
-
-Initialize a project, capture or import conversations, and open the viewer:
+Development checks:
 
 ```sh
-orbit init
-orbit dashboard
-```
-
-The dashboard runs at `http://127.0.0.1:4319` and opens directly to your projects.
-It includes project history, workstreams, connected agent sessions, conversation
-search, checkpoints, and comparisons. No account, sign-in, Docker, or manual push
-is needed. New captured events appear automatically, even before a checkpoint.
-
-`orbit init` and capture/import commands register the project and start the local
-service. For projects created with an older Orbit release, run `orbit dashboard`
-inside each project once. The dashboard then lists those registered projects from
-any directory. Existing native agent transcripts still require `orbit import`.
-
-The viewer reads each project's existing `.orbit/` database. A private directory
-at `~/.orbit/viewer/projects/` records project locations; it does not duplicate the
-conversations. The service binds to loopback and accepts same-origin requests.
-The browser is read only; use the CLI to change history or launch an agent.
-
-```sh
-orbit dashboard --no-open        # Print the URL without opening a browser
-orbit dashboard --stop           # Stop the background service
-orbit dashboard --foreground     # Run the service in this terminal
-orbit dashboard --port 4320      # Use another local port
-```
-
-Set `ORBIT_VIEWER=0` to disable automatic viewer startup and project registration.
-An explicit `orbit dashboard` still works. Set `ORBIT_VIEWER_PORT` to keep a custom
-port across commands. Closing a browser tab does not stop the service.
-
-The npm package includes the local UI and its fonts. Hosted accounts and the
-hosted API remain in the separate `orbit-dashboard` repository.
-
-## Optional hosted publishing
-
-Use `orbit dashboard --remote` to print the configured hosted dashboard URL.
-Hosted publishing is disabled by default and limited to selected sessions:
-
-```sh
-export ORBIT_SERVER_URL=https://your-orbit-server.example
-orbit auth login
-orbit publish select <session-id>
-orbit publish enable
-orbit push
-```
-
-## Development
-
-```sh
-npm ci
 npm run typecheck
 npm test
 npm run format:check
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development conventions,
-[docs/architecture.md](docs/architecture.md) for module boundaries, and
-[docs/protocol.md](docs/protocol.md) for the conversation and publishing protocol.
+See [CONTRIBUTING.md](CONTRIBUTING.md),
+[architecture](docs/architecture.md),
+[conversation protocol](docs/protocol.md), and
+[adapter development](docs/adapters.md).

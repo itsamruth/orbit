@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="680" viewBox="0 0 1120 680" role="img" aria-labelledby="title description">
+<title id="title">Orbit: Claude to Codex in a 60-second annotated replay</title>
+<desc id="description">Six ten-second scenes from a real guided demo. Claude reproduces duplicate refreshes, rejects increasing the retry count, and Orbit hands off to Codex. Codex asks for confirmation, then adds a shared refresh promise. The focused test and all three sample tests pass. This is an edited text replay, not native terminal footage or a performance benchmark. An accessible transcript is available in docs/demo.md.</desc>
+<style>
+text{font-family:"IBM Plex Mono","Courier New",monospace;fill:#28312d}
+.brand{font-family:Georgia,serif;font-size:28px;font-weight:bold}
+.heading{font-family:Georgia,serif;font-size:36px}
+.label{font-size:14px;fill:#647069;letter-spacing:1px}
+.body{font-size:20px}
+.note{font-size:14px;fill:#647069}
+.scene{opacity:0;animation-duration:60s;animation-iteration-count:infinite;animation-timing-function:step-end}
+@keyframes scene0{0%{opacity:1}16.65%{opacity:1}16.67%,100%{opacity:0}}
+@keyframes scene1{0%,16.66%{opacity:0}16.67%,33.32%{opacity:1}33.33%,100%{opacity:0}}
+@keyframes scene2{0%,33.32%{opacity:0}33.33%,49.99%{opacity:1}50.00%,100%{opacity:0}}
+@keyframes scene3{0%,49.99%{opacity:0}50.00%,66.66%{opacity:1}66.67%,100%{opacity:0}}
+@keyframes scene4{0%,66.66%{opacity:0}66.67%,83.32%{opacity:1}83.33%,100%{opacity:0}}
+@keyframes scene5{0%,83.32%{opacity:0}83.33%,99.99%{opacity:1}100%{opacity:1}}
+@keyframes progress{from{width:0}to{width:1032px}}
+.progress{animation:progress 60s linear infinite}
+@media (prefers-reduced-motion:reduce){.scene{animation:none!important;opacity:0}.scene:last-of-type{opacity:1}.progress{animation:none;width:1032px}}
+</style>
+<rect width="1120" height="680" rx="18" fill="#f5f3eb"/>
+<path d="M44 86H1076M44 594H1076" stroke="#d4d8cd"/>
+<text x="44" y="55" class="brand">Orbit</text>
+<text x="1076" y="52" text-anchor="end" class="label">REAL RUN / ANNOTATED REPLAY / 60 SECONDS</text>
+<g class="scene" style="animation-name:scene0">
+<text x="44" y="128" class="label">00-10s / GUIDED TASK</text>
+<text x="44" y="180" class="heading">One bug. Two agents.</text>
+<rect x="44" y="211" width="1032" height="328" rx="8" fill="#fffef8" stroke="#d4d8cd"/>
+<text x="68" y="249" class="body" xml:space="preserve">Two concurrent requests receive HTTP 401.</text>
+<text x="68" y="283" class="body" xml:space="preserve">Both recover, but refresh() runs twice.</text>
+<text x="68" y="317" class="body" xml:space="preserve"></text>
+<text x="68" y="351" class="body" xml:space="preserve">Developer asks Claude to reproduce the bug,</text>
+<text x="68" y="385" class="body" xml:space="preserve">try increasing maxRetries, and stop</text>
+<text x="68" y="419" class="body" xml:space="preserve">before implementing the concurrency fix.</text>
+<text x="44" y="570" class="note">The failed approach is deliberate. This is not a quota-error recording.</text>
+</g>
+<g class="scene" style="animation-name:scene1">
+<text x="44" y="128" class="label">10-20s / OBSERVED OUTPUT</text>
+<text x="44" y="180" class="heading">Claude reproduces the failure.</text>
+<rect x="44" y="211" width="1032" height="328" rx="8" fill="#fffef8" stroke="#d4d8cd"/>
+<text x="68" y="249" class="body" xml:space="preserve">$ node --test --test-name-pattern=</text>
+<text x="68" y="283" class="body" xml:space="preserve">    &quot;concurrent 401s share one refresh&quot; client.test.mjs</text>
+<text x="68" y="317" class="body" xml:space="preserve"></text>
+<text x="68" y="351" class="body" xml:space="preserve">not ok 1 - concurrent 401s share one refresh</text>
+<text x="68" y="385" class="body" xml:space="preserve">expected: 1</text>
+<text x="68" y="419" class="body" xml:space="preserve">actual:   2</text>
+<text x="68" y="453" class="body" xml:space="preserve">Exit code 1</text>
+<text x="44" y="570" class="note">Command wrapped for display. The first test exposes duplicate refreshes.</text>
+</g>
+<g class="scene" style="animation-name:scene2">
+<text x="44" y="128" class="label">20-30s / CLAUDE</text>
+<text x="44" y="180" class="heading">The dead end stays with the task.</text>
+<rect x="44" y="211" width="1032" height="328" rx="8" fill="#fffef8" stroke="#d4d8cd"/>
+<text x="68" y="249" class="body" xml:space="preserve">client.mjs: maxRetries = 1  -&gt;  maxRetries = 2</text>
+<text x="68" y="283" class="body" xml:space="preserve">Same focused test. Same failure: 2 !== 1.</text>
+<text x="68" y="317" class="body" xml:space="preserve"></text>
+<text x="68" y="351" class="body" xml:space="preserve">Rejection reason (abridged):</text>
+<text x="68" y="385" class="body" xml:space="preserve">More retries do not coordinate concurrent callers.</text>
+<text x="68" y="419" class="body" xml:space="preserve"></text>
+<text x="68" y="453" class="body" xml:space="preserve">Next step: share one in-flight refresh promise.</text>
+<text x="44" y="570" class="note">This reason came from Claude's visible reply, not hidden reasoning.</text>
+</g>
+<g class="scene" style="animation-name:scene3">
+<text x="44" y="128" class="label">30-40s / ORBIT</text>
+<text x="44" y="180" class="heading">Switch the agent, not the task.</text>
+<rect x="44" y="211" width="1032" height="328" rx="8" fill="#fffef8" stroke="#d4d8cd"/>
+<text x="68" y="249" class="body" xml:space="preserve">$ orbit switch codex</text>
+<text x="68" y="283" class="body" xml:space="preserve"></text>
+<text x="68" y="317" class="body" xml:space="preserve">From: claude  -&gt;  codex</text>
+<text x="68" y="351" class="body" xml:space="preserve">Preparing context for codex...</text>
+<text x="68" y="385" class="body" xml:space="preserve">Opening codex with this conversation.</text>
+<text x="68" y="419" class="body" xml:space="preserve"></text>
+<text x="68" y="453" class="body" xml:space="preserve">The conversation continues in the same workstream.</text>
+<text x="44" y="570" class="note">Bounded context in an initial prompt. Not native transcript scrollback.</text>
+</g>
+<g class="scene" style="animation-name:scene4">
+<text x="44" y="128" class="label">40-50s / HANDOFF</text>
+<text x="44" y="180" class="heading">Codex recognizes the earlier attempt.</text>
+<rect x="44" y="211" width="1032" height="328" rx="8" fill="#fffef8" stroke="#d4d8cd"/>
+<text x="68" y="249" class="body" xml:space="preserve">Codex (abridged): the history records that</text>
+<text x="68" y="283" class="body" xml:space="preserve">maxRetries = 2 still produced two refreshes.</text>
+<text x="68" y="317" class="body" xml:space="preserve"></text>
+<text x="68" y="351" class="body" xml:space="preserve">It checks the workspace and asks what to continue.</text>
+<text x="68" y="385" class="body" xml:space="preserve"></text>
+<text x="68" y="419" class="body" xml:space="preserve">Developer: Continue with the next step and run</text>
+<text x="68" y="453" class="body" xml:space="preserve">the focused test and the full suite.</text>
+<text x="68" y="487" class="body" xml:space="preserve">Do not change tests or commit.</text>
+<text x="44" y="570" class="note">Confirmation was needed. No second bug brief or repeated retry experiment.</text>
+</g>
+<g class="scene" style="animation-name:scene5">
+<text x="44" y="128" class="label">50-60s / OBSERVED RESULTS</text>
+<text x="44" y="180" class="heading">Continue with the concurrency fix.</text>
+<rect x="44" y="211" width="1032" height="328" rx="8" fill="#fffef8" stroke="#d4d8cd"/>
+<text x="68" y="249" class="body" xml:space="preserve">Codex adds a shared pendingRefresh promise.</text>
+<text x="68" y="283" class="body" xml:space="preserve">Clears it after success or failure.</text>
+<text x="68" y="317" class="body" xml:space="preserve"></text>
+<text x="68" y="351" class="body" xml:space="preserve">Focused test:             pass 1 / fail 0</text>
+<text x="68" y="385" class="body" xml:space="preserve">Full sample suite:        pass 3 / fail 0</text>
+<text x="68" y="419" class="body" xml:space="preserve"></text>
+<text x="68" y="453" class="body" xml:space="preserve">Tests unchanged. maxRetries = 2 retained.</text>
+<text x="68" y="487" class="body" xml:space="preserve">No commit made.</text>
+<text x="44" y="570" class="note">Node invocation troubleshooting omitted here; documented in the transcript.</text>
+</g>
+<text x="44" y="628" class="note">Guided scenario. Excerpts condensed. Model waits removed. Not a speed benchmark.</text>
+<rect x="44" y="650" width="1032" height="4" rx="2" fill="#d4d8cd"/>
+<rect x="44" y="650" height="4" rx="2" fill="#476758" class="progress"/>
+</svg>
